@@ -6,7 +6,8 @@ RUN apt update && \
     libncurses5-dev libgdbm-dev \
     libnss3-dev libssl-dev \
     libreadline-dev libffi-dev ca-certificates \
-    pkg-config wget git curl unzip lsb-release rsync sudo libjemalloc-dev gperf && \
+    pkg-config wget git curl unzip lsb-release rsync sudo libjemalloc-dev gperf \
+    uuid-dev && \
     rm -rf /var/lib/apt/lists/*
 
 RUN cd /tmp/ && \
