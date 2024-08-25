@@ -30,6 +30,6 @@ RUN git reset --hard 409bd76fd6eafc4cf1c414e679f3e912447a6a31
 RUN git submodule update --init --recursive --jobs=$(nproc) --force
 RUN git reset --soft 2ce278dbbbeeeb6543cf1e970ba47d99726f893a
 RUN git show 409bd76fd6eafc4cf1c414e679f3e912447a6a31:.gitmodules > .gitmodules
-VOLUME [ "/usr/src" ]
+VOLUME [ "/dist" ]
 COPY entrypoint.sh /usr/bin/entrypoint.sh
 ENTRYPOINT ["/usr/bin/entrypoint.sh"]
