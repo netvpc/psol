@@ -31,5 +31,29 @@ RUN git reset --soft 2ce278dbbbeeeb6543cf1e970ba47d99726f893a
 RUN git show 409bd76fd6eafc4cf1c414e679f3e912447a6a31:.gitmodules > .gitmodules
 
 COPY entrypoint.sh /usr/bin/entrypoint.sh
-RUN bash /usr/bin/entrypoint.sh
 ## ENTRYPOINT ["/usr/bin/entrypoint.sh"]
+
+RUN bash -c ' \
+    ARCH=$(uname -m) && \
+    declare -A PATCH_FILES=( \
+        ["aarch64"]="../incubator-pagespeed-mod-aarch64.patch" \
+        ["armv7l"]="../incubator-pagespeed-mod-armv7l.patch" \
+    ) && \
+    if [[ -n "${PATCH_FILES[$ARCH]}" ]]; then \
+        echo "Applying patch for $ARCH..." && \
+        patch -Np1 -i "${PATCH_FILES[$ARCH]}" ; \
+    elif [[ "$ARCH" == "x86_64" ]]; then \
+        echo "x86_64 architecture detected. No patch applied." ; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1 ; \
+    fi && \
+    GLIBC_VERSION=$(ldd --version | awk "NR==1 {print \$NF}") && \
+    GLIBC_VERSION_NUMBER=$(echo "$GLIBC_VERSION" | awk -F. "{print \$1 * 100 + \$2}") && \
+    if [[ "$GLIBC_VERSION_NUMBER" -ge 228 ]]; then \
+        echo "glibc version $GLIBC_VERSION detected. Applying sed command..." && \
+        sed -i "s/sys_siglist\\[signum\\]/strsignal(signum)/g" third_party/apr/src/threadproc/unix/signals.c ; \
+    else \
+        echo "glibc version $GLIBC_VERSION detected. No sed command applied." ; \
+    fi && \
+    python build/gyp_chromium --depth=. && \
+    install/build_psol.sh --skip_tests '
