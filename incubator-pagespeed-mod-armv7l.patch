@@ -1,0 +1,5701 @@
+diff -Naur incubator-pagespeed-mod.orig/build/install.gyp incubator-pagespeed-mod/build/install.gyp
+--- incubator-pagespeed-mod.orig/build/install.gyp	2020-05-11 17:08:17.572793000 +0100
++++ incubator-pagespeed-mod/build/install.gyp	2020-05-11 17:48:17.889752612 +0100
+@@ -67,6 +67,10 @@
+             'deb_arch': 'amd64',
+             'rpm_arch': 'x86_64',
+           }],
++          ['target_arch=="arm"', {
++            'deb_arch': 'armv7l',
++            'rpm_arch': 'armv7l',
++          }],
+         ],
+       },
+       'targets': [
+diff -Naur incubator-pagespeed-mod.orig/install/build_psol.sh incubator-pagespeed-mod/install/build_psol.sh
+--- incubator-pagespeed-mod.orig/install/build_psol.sh	2020-05-11 17:08:17.652792532 +0100
++++ incubator-pagespeed-mod/install/build_psol.sh	2020-05-11 17:48:17.889752612 +0100
+@@ -19,7 +19,7 @@
+ # Builds psol tarball from a mod_pagespeed checkout.
+ 
+ cd $(dirname "$BASH_SOURCE")/..
+-source install/build_env.sh || exit 1
++#source install/build_env.sh || exit 1
+ 
+ buildtype=Release
+ install_deps=true
+@@ -60,7 +60,7 @@
+ 
+ MAKE_ARGS=(V=1 BUILDTYPE=$buildtype)
+ 
+-run_with_log log/gyp.log python build/gyp_chromium --depth=.
++python build/gyp_chromium --depth=.
+ 
+ if $run_tests; then
+   run_with_log log/psol_build.log make "${MAKE_ARGS[@]}" \
+@@ -70,9 +70,8 @@
+ # Using a subshell to contain the cd.
+ mps_root=$PWD
+ (cd pagespeed/automatic && \
+-  run_with_log ../../log/psol_automatic_build.log \
+-  make "${MAKE_ARGS[@]}" MOD_PAGESPEED_ROOT=$mps_root \
+-  CXXFLAGS="-DSERF_HTTPS_FETCHING=1" all)
++  make -j4 "${MAKE_ARGS[@]}" MOD_PAGESPEED_ROOT=$mps_root \
++  CXXFLAGS="-DSERF_HTTPS_FETCHING=1" CFLAGS="-DPNG_ARM_NEON_OPT=0" all)
+ 
+ version_h=out/$buildtype/obj/gen/net/instaweb/public/version.h
+ if [ ! -f $version_h ]; then
+@@ -98,6 +97,8 @@
+ 
+ if [ "$(uname -m)" = x86_64 ]; then
+   bit_size_name=x64
++elif [ "$(uname -m)" = armv7l ]; then
++  bit_size_name=armv7l
+ else
+   bit_size_name=ia32
+ fi
+diff -Naur incubator-pagespeed-mod.orig/pagespeed/automatic/Makefile incubator-pagespeed-mod/pagespeed/automatic/Makefile
+--- incubator-pagespeed-mod.orig/pagespeed/automatic/Makefile	2020-05-11 17:08:18.082790009 +0100
++++ incubator-pagespeed-mod/pagespeed/automatic/Makefile	2020-05-11 17:49:03.808306293 +0100
+@@ -211,7 +211,7 @@
+ endif
+ INCLUDE_ARCH = arch/linux/x64
+ LIBS = $(addprefix $(MOD_PAGESPEED_ROOT)/out/$(BUILDTYPE)/obj.target/, $(BASE_LIBS))
+-SYSLIBS = -lpthread -lrt -luuid
++SYSLIBS = -lpthread -lrt -l:libuuid.so.1
+ TESTBENCH_LIB = $(MOD_PAGESPEED_ROOT)/out/$(BUILDTYPE)/obj.target/third_party/re2/libre2_bench_util.a
+ 
+ build_libraries :
+diff -Naur incubator-pagespeed-mod.orig/third_party/apr/apr.gyp incubator-pagespeed-mod/third_party/apr/apr.gyp
+--- incubator-pagespeed-mod.orig/third_party/apr/apr.gyp	2020-05-11 17:08:18.382788236 +0100
++++ incubator-pagespeed-mod/third_party/apr/apr.gyp	2020-05-11 17:48:48.508788292 +0100
+@@ -81,7 +81,7 @@
+                   'link_settings': {
+                     'libraries': [
+                       '-ldl',
+-                      '-luuid',
++                      '-l:libuuid.so.1',
+                   ]},
+                 }],
+               ],
+diff -Naur incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/arm/include/apr.h incubator-pagespeed-mod/third_party/apr/gen/arch/linux/arm/include/apr.h
+--- incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/arm/include/apr.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/apr/gen/arch/linux/arm/include/apr.h	2020-05-11 17:48:18.119745370 +0100
+@@ -0,0 +1,512 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++
++#ifndef APR_H
++#define APR_H
++
++/* GENERATED FILE WARNING!  DO NOT EDIT apr.h
++ *
++ * You must modify apr.h.in instead.
++ *
++ * And please, make an effort to stub apr.hw and apr.hnw in the process.
++ */
++
++/**
++ * @file apr.h
++ * @brief APR Platform Definitions
++ * @remark This is a generated header generated from include/apr.h.in by
++ * ./configure, or copied from include/apr.hw or include/apr.hnw
++ * for Win32 or Netware by those build environments, respectively.
++ */
++
++/**
++ * @defgroup APR Apache Portability Runtime library
++ * @{
++ */
++/**
++ * @defgroup apr_platform Platform Definitions
++ * @{
++ * @warning
++ * <strong><em>The actual values of macros and typedefs on this page<br>
++ * are platform specific and should NOT be relied upon!</em></strong>
++ */
++
++/* So that we can use inline on some critical functions, and use
++ * GNUC attributes (such as to get -Wall warnings for printf-like
++ * functions).  Only do this in gcc 2.7 or later ... it may work
++ * on earlier stuff, but why chance it.
++ *
++ * We've since discovered that the gcc shipped with NeXT systems
++ * as "cc" is completely broken.  It claims to be __GNUC__ and so
++ * on, but it doesn't implement half of the things that __GNUC__
++ * means.  In particular it's missing inline and the __attribute__
++ * stuff.  So we hack around it.  PR#1613. -djg
++ */
++#if !defined(__GNUC__) || __GNUC__ < 2 || \
++    (__GNUC__ == 2 && __GNUC_MINOR__ < 7) ||\
++    defined(NEXT)
++#ifndef __attribute__
++#define __attribute__(__x)
++#endif
++#define APR_INLINE
++#define APR_HAS_INLINE		0
++#else
++#define APR_INLINE __inline__
++#define APR_HAS_INLINE		1
++#endif
++
++#define APR_HAVE_ARPA_INET_H     1
++#define APR_HAVE_CONIO_H         0
++#define APR_HAVE_CRYPT_H         1
++#define APR_HAVE_CTYPE_H         1
++#define APR_HAVE_DIRENT_H        1
++#define APR_HAVE_ERRNO_H         1
++#define APR_HAVE_FCNTL_H         1
++#define APR_HAVE_IO_H            0
++#define APR_HAVE_LIMITS_H        1
++#define APR_HAVE_NETDB_H         1
++#define APR_HAVE_NETINET_IN_H    1
++#define APR_HAVE_NETINET_SCTP_H  0
++#define APR_HAVE_NETINET_SCTP_UIO_H 0
++#define APR_HAVE_NETINET_TCP_H   1
++#define APR_HAVE_PTHREAD_H       1
++#define APR_HAVE_SEMAPHORE_H     1
++#define APR_HAVE_SIGNAL_H        1
++#define APR_HAVE_STDARG_H        1
++#define APR_HAVE_STDINT_H        1
++#define APR_HAVE_STDIO_H         1
++#define APR_HAVE_STDLIB_H        1
++#define APR_HAVE_STRING_H        1
++#define APR_HAVE_STRINGS_H       1
++#define APR_HAVE_SYS_IOCTL_H     1
++#define APR_HAVE_SYS_SENDFILE_H  1
++#define APR_HAVE_SYS_SIGNAL_H    1
++#define APR_HAVE_SYS_SOCKET_H    1
++#define APR_HAVE_SYS_SOCKIO_H    0
++#define APR_HAVE_SYS_SYSLIMITS_H 0
++#define APR_HAVE_SYS_TIME_H      1
++#define APR_HAVE_SYS_TYPES_H     1
++#define APR_HAVE_SYS_UIO_H       1
++#define APR_HAVE_SYS_UN_H        1
++#define APR_HAVE_SYS_WAIT_H      1
++#define APR_HAVE_TIME_H          1
++#define APR_HAVE_UNISTD_H        1
++#define APR_HAVE_WINDOWS_H       0
++#define APR_HAVE_WINSOCK2_H      0
++
++/** @} */
++/** @} */
++
++/* We don't include our conditional headers within the doxyblocks
++ * or the extern "C" namespace
++ */
++
++#if APR_HAVE_WINDOWS_H
++#include <windows.h>
++#endif
++
++#if APR_HAVE_WINSOCK2_H
++#include <winsock2.h>
++#endif
++
++#if APR_HAVE_SYS_TYPES_H
++#include <sys/types.h>
++#endif
++
++#if APR_HAVE_SYS_SOCKET_H
++#include <sys/socket.h>
++#endif
++
++#if defined(__cplusplus) && !defined(__STDC_CONSTANT_MACROS)
++/* C99 7.18.4 requires that stdint.h only exposes INT64_C
++ * and UINT64_C for C++ implementations if this is defined: */
++#define __STDC_CONSTANT_MACROS
++#endif
++
++#if APR_HAVE_STDINT_H
++#include <stdint.h>
++#endif
++
++#if APR_HAVE_SYS_WAIT_H
++#include <sys/wait.h>
++#endif
++
++#ifdef OS2
++#define INCL_DOS
++#define INCL_DOSERRORS
++#include <os2.h>
++#endif
++
++/* header files for PATH_MAX, _POSIX_PATH_MAX */
++#if APR_HAVE_LIMITS_H
++#include <limits.h>
++#else
++#if APR_HAVE_SYS_SYSLIMITS_H
++#include <sys/syslimits.h>
++#endif
++#endif
++
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @addtogroup apr_platform
++ * @ingroup APR
++ * @{
++ */
++
++#define APR_HAVE_SHMEM_MMAP_TMP     1
++#define APR_HAVE_SHMEM_MMAP_SHM     1
++#define APR_HAVE_SHMEM_MMAP_ZERO    1
++#define APR_HAVE_SHMEM_SHMGET_ANON  1
++#define APR_HAVE_SHMEM_SHMGET       1
++#define APR_HAVE_SHMEM_MMAP_ANON    1
++#define APR_HAVE_SHMEM_BEOS         0
++
++#define APR_USE_SHMEM_MMAP_TMP     0
++#define APR_USE_SHMEM_MMAP_SHM     0
++#define APR_USE_SHMEM_MMAP_ZERO    0
++#define APR_USE_SHMEM_SHMGET_ANON  0
++#define APR_USE_SHMEM_SHMGET       1
++#define APR_USE_SHMEM_MMAP_ANON    1
++#define APR_USE_SHMEM_BEOS         0
++
++#define APR_USE_FLOCK_SERIALIZE           0
++#define APR_USE_SYSVSEM_SERIALIZE         1
++#define APR_USE_POSIXSEM_SERIALIZE        0
++#define APR_USE_FCNTL_SERIALIZE           0
++#define APR_USE_PROC_PTHREAD_SERIALIZE    0
++#define APR_USE_PTHREAD_SERIALIZE         1
++
++#define APR_HAS_FLOCK_SERIALIZE           1
++#define APR_HAS_SYSVSEM_SERIALIZE         1
++#define APR_HAS_POSIXSEM_SERIALIZE        1
++#define APR_HAS_FCNTL_SERIALIZE           1
++#define APR_HAS_PROC_PTHREAD_SERIALIZE    1
++
++#define APR_PROCESS_LOCK_IS_GLOBAL        0
++
++#define APR_HAVE_CORKABLE_TCP   1
++#define APR_HAVE_GETRLIMIT      1
++#define APR_HAVE_IN_ADDR        1
++#define APR_HAVE_INET_ADDR      1
++#define APR_HAVE_INET_NETWORK   1
++#define APR_HAVE_IPV6           1
++#define APR_HAVE_MEMMOVE        1
++#define APR_HAVE_SETRLIMIT      1
++#define APR_HAVE_SIGACTION      1
++#define APR_HAVE_SIGSUSPEND     1
++#define APR_HAVE_SIGWAIT        1
++#define APR_HAVE_SA_STORAGE     1
++#define APR_HAVE_STRCASECMP     1
++#define APR_HAVE_STRDUP         1
++#define APR_HAVE_STRICMP        0
++#define APR_HAVE_STRNCASECMP    1
++#define APR_HAVE_STRNICMP       0
++#define APR_HAVE_STRSTR         1
++#define APR_HAVE_MEMCHR         1
++#define APR_HAVE_STRUCT_RLIMIT  1
++#define APR_HAVE_UNION_SEMUN    0
++#define APR_HAVE_SCTP           0
++#define APR_HAVE_IOVEC          1
++
++/*  APR Feature Macros */
++#define APR_HAS_SHARED_MEMORY     1
++#define APR_HAS_THREADS           1
++#define APR_HAS_SENDFILE          1
++#define APR_HAS_MMAP              1
++#define APR_HAS_FORK              1
++#define APR_HAS_RANDOM            1
++#define APR_HAS_OTHER_CHILD       1
++#define APR_HAS_DSO               1
++#define APR_HAS_SO_ACCEPTFILTER   0
++#define APR_HAS_UNICODE_FS        0
++#define APR_HAS_PROC_INVOKED      0
++#define APR_HAS_USER              1
++#define APR_HAS_LARGE_FILES       1
++#define APR_HAS_XTHREAD_FILES     0
++#define APR_HAS_OS_UUID           0
++
++#define APR_PROCATTR_USER_SET_REQUIRES_PASSWORD 0
++
++/* APR sets APR_FILES_AS_SOCKETS to 1 on systems where it is possible
++ * to poll on files/pipes.
++ */
++#define APR_FILES_AS_SOCKETS      1
++
++/* This macro indicates whether or not EBCDIC is the native character set.
++ */
++#define APR_CHARSET_EBCDIC        0
++
++/* If we have a TCP implementation that can be "corked", what flag
++ * do we use?
++ */
++#define APR_TCP_NOPUSH_FLAG       TCP_CORK
++
++/* Is the TCP_NODELAY socket option inherited from listening sockets?
++*/
++#define APR_TCP_NODELAY_INHERITED 1
++
++/* Is the O_NONBLOCK flag inherited from listening sockets?
++*/
++#define APR_O_NONBLOCK_INHERITED 0
++
++/* Typedefs that APR needs. */
++
++typedef  unsigned char           apr_byte_t;
++
++typedef  short           apr_int16_t;
++typedef  unsigned short  apr_uint16_t;
++
++typedef  int             apr_int32_t;
++typedef  unsigned int    apr_uint32_t;
++
++typedef  long long            apr_int64_t;
++typedef  unsigned long long   apr_uint64_t;
++
++typedef  size_t          apr_size_t;
++typedef  ssize_t         apr_ssize_t;
++typedef  off64_t           apr_off_t;
++typedef  socklen_t       apr_socklen_t;
++typedef  unsigned long           apr_ino_t;
++
++#define APR_SIZEOF_VOIDP 4
++
++#if APR_SIZEOF_VOIDP == 8
++typedef  apr_uint64_t            apr_uintptr_t;
++#else
++typedef  apr_uint32_t            apr_uintptr_t;
++#endif
++
++/* Are we big endian? */
++#define APR_IS_BIGENDIAN	0
++
++/* Mechanisms to properly type numeric literals */
++#define APR_INT64_C(val) INT64_C(val)
++#define APR_UINT64_C(val) UINT64_C(val)
++
++#ifdef INT16_MIN
++#define APR_INT16_MIN   INT16_MIN
++#else
++#define APR_INT16_MIN   (-0x7fff - 1)
++#endif
++
++#ifdef INT16_MAX
++#define APR_INT16_MAX  INT16_MAX
++#else
++#define APR_INT16_MAX   (0x7fff)
++#endif
++
++#ifdef UINT16_MAX
++#define APR_UINT16_MAX  UINT16_MAX
++#else
++#define APR_UINT16_MAX  (0xffff)
++#endif
++
++#ifdef INT32_MIN
++#define APR_INT32_MIN   INT32_MIN
++#else
++#define APR_INT32_MIN   (-0x7fffffff - 1)
++#endif
++
++#ifdef INT32_MAX
++#define APR_INT32_MAX  INT32_MAX
++#else
++#define APR_INT32_MAX  0x7fffffff
++#endif
++
++#ifdef UINT32_MAX
++#define APR_UINT32_MAX  UINT32_MAX
++#else
++#define APR_UINT32_MAX  (0xffffffffU)
++#endif
++
++#ifdef INT64_MIN
++#define APR_INT64_MIN   INT64_MIN
++#else
++#define APR_INT64_MIN   (APR_INT64_C(-0x7fffffffffffffff) - 1)
++#endif
++
++#ifdef INT64_MAX
++#define APR_INT64_MAX   INT64_MAX
++#else
++#define APR_INT64_MAX   APR_INT64_C(0x7fffffffffffffff)
++#endif
++
++#ifdef UINT64_MAX
++#define APR_UINT64_MAX  UINT64_MAX
++#else
++#define APR_UINT64_MAX  APR_UINT64_C(0xffffffffffffffff)
++#endif
++
++#define APR_SIZE_MAX    (~((apr_size_t)0))
++
++
++/* Definitions that APR programs need to work properly. */
++
++/**
++ * APR public API wrap for C++ compilers.
++ */
++#ifdef __cplusplus
++#define APR_BEGIN_DECLS     extern "C" {
++#define APR_END_DECLS       }
++#else
++#define APR_BEGIN_DECLS
++#define APR_END_DECLS
++#endif
++
++/**
++ * Thread callbacks from APR functions must be declared with APR_THREAD_FUNC,
++ * so that they follow the platform's calling convention.
++ * <PRE>
++ *
++ * void* APR_THREAD_FUNC my_thread_entry_fn(apr_thread_t *thd, void *data);
++ *
++ * </PRE>
++ */
++#define APR_THREAD_FUNC
++
++/**
++ * The public APR functions are declared with APR_DECLARE(), so they may
++ * use the most appropriate calling convention.  Public APR functions with
++ * variable arguments must use APR_DECLARE_NONSTD().
++ *
++ * @remark Both the declaration and implementations must use the same macro.
++ *
++ * <PRE>
++ * APR_DECLARE(rettype) apr_func(args)
++ * </PRE>
++ * @see APR_DECLARE_NONSTD @see APR_DECLARE_DATA
++ * @remark Note that when APR compiles the library itself, it passes the
++ * symbol -DAPR_DECLARE_EXPORT to the compiler on some platforms (e.g. Win32)
++ * to export public symbols from the dynamic library build.\n
++ * The user must define the APR_DECLARE_STATIC when compiling to target
++ * the static APR library on some platforms (e.g. Win32.)  The public symbols
++ * are neither exported nor imported when APR_DECLARE_STATIC is defined.\n
++ * By default, compiling an application and including the APR public
++ * headers, without defining APR_DECLARE_STATIC, will prepare the code to be
++ * linked to the dynamic library.
++ */
++#define APR_DECLARE(type)            type
++
++/**
++ * The public APR functions using variable arguments are declared with
++ * APR_DECLARE_NONSTD(), as they must follow the C language calling convention.
++ * @see APR_DECLARE @see APR_DECLARE_DATA
++ * @remark Both the declaration and implementations must use the same macro.
++ * <PRE>
++ *
++ * APR_DECLARE_NONSTD(rettype) apr_func(args, ...);
++ *
++ * </PRE>
++ */
++#define APR_DECLARE_NONSTD(type)     type
++
++/**
++ * The public APR variables are declared with AP_MODULE_DECLARE_DATA.
++ * This assures the appropriate indirection is invoked at compile time.
++ * @see APR_DECLARE @see APR_DECLARE_NONSTD
++ * @remark Note that the declaration and implementations use different forms,
++ * but both must include the macro.
++ *
++ * <PRE>
++ *
++ * extern APR_DECLARE_DATA type apr_variable;\n
++ * APR_DECLARE_DATA type apr_variable = value;
++ *
++ * </PRE>
++ */
++#define APR_DECLARE_DATA
++
++/* Define APR_SSIZE_T_FMT.
++ * If ssize_t is an integer we define it to be "d",
++ * if ssize_t is a long int we define it to be "ld",
++ * if ssize_t is neither we declare an error here.
++ * I looked for a better way to define this here, but couldn't find one, so
++ * to find the logic for this definition search for "ssize_t_fmt" in
++ * configure.in.
++ */
++#define APR_SSIZE_T_FMT "d"
++
++/* And APR_SIZE_T_FMT */
++#define APR_SIZE_T_FMT "u"
++
++/* And APR_OFF_T_FMT */
++#define APR_OFF_T_FMT APR_INT64_T_FMT
++
++/* And APR_PID_T_FMT */
++#define APR_PID_T_FMT "d"
++
++/* And APR_INT64_T_FMT */
++#define APR_INT64_T_FMT "lld"
++
++/* And APR_UINT64_T_FMT */
++#define APR_UINT64_T_FMT "llu"
++
++/* And APR_UINT64_T_HEX_FMT */
++#define APR_UINT64_T_HEX_FMT "llx"
++
++/* Does the proc mutex lock threads too */
++#define APR_PROC_MUTEX_IS_GLOBAL      0
++
++/* Local machine definition for console and log output. */
++#define APR_EOL_STR              "\n"
++
++#if APR_HAVE_SYS_WAIT_H
++#ifdef WEXITSTATUS
++#define apr_wait_t       int
++#else
++#define apr_wait_t       union wait
++#define WEXITSTATUS(status)    (int)((status).w_retcode)
++#define WTERMSIG(status)       (int)((status).w_termsig)
++#endif /* !WEXITSTATUS */
++#elif defined(__MINGW32__)
++typedef int apr_wait_t;
++#endif /* HAVE_SYS_WAIT_H */
++
++#if defined(PATH_MAX)
++#define APR_PATH_MAX       PATH_MAX
++#elif defined(_POSIX_PATH_MAX)
++#define APR_PATH_MAX       _POSIX_PATH_MAX
++#else
++#error no decision has been made on APR_PATH_MAX for your platform
++#endif
++
++#define APR_DSOPATH "LD_LIBRARY_PATH"
++
++/** @} */
++
++/* Definitions that only Win32 programs need to compile properly. */
++
++/* XXX These simply don't belong here, perhaps in apr_portable.h
++ * based on some APR_HAVE_PID/GID/UID?
++ */
++#ifdef __MINGW32__
++#ifndef __GNUC__
++typedef  int         pid_t;
++#endif
++typedef  int         uid_t;
++typedef  int         gid_t;
++#endif
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* APR_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/arm/include/apr_private.h incubator-pagespeed-mod/third_party/apr/gen/arch/linux/arm/include/apr_private.h
+--- incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/arm/include/apr_private.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/apr/gen/arch/linux/arm/include/apr_private.h	2020-05-11 17:48:18.119745370 +0100
+@@ -0,0 +1,938 @@
++/* include/arch/unix/apr_private.h.  Generated from apr_private.h.in by configure.  */
++/* include/arch/unix/apr_private.h.in.  Generated from configure.in by autoheader.  */
++
++
++#ifndef APR_PRIVATE_H
++#define APR_PRIVATE_H
++
++
++/* Define as function which can be used for conversion of strings to
++   apr_int64_t */
++#define APR_INT64_STRFN strtoll
++
++/* Define as function used for conversion of strings to apr_off_t */
++#define APR_OFF_T_STRFN strtoll
++
++/* Define to one of `_getb67', `GETB67', `getb67' for Cray-2 and Cray-YMP
++   systems. This function is required for `alloca.c' support on those systems.
++   */
++/* #undef CRAY_STACKSEG_END */
++
++/* Define to 1 if using `alloca.c'. */
++/* #undef C_ALLOCA */
++
++/* Define to path of random device */
++#define DEV_RANDOM "/dev/urandom"
++
++/* Define if struct dirent has an inode member */
++#define DIRENT_INODE d_fileno
++
++/* Define if struct dirent has a d_type member */
++#define DIRENT_TYPE d_type
++
++/* Define if DSO support uses dlfcn.h */
++#define DSO_USE_DLFCN 1
++
++/* Define if DSO support uses dyld.h */
++/* #undef DSO_USE_DYLD */
++
++/* Define if DSO support uses shl_load */
++/* #undef DSO_USE_SHL */
++
++/* Define to list of paths to EGD sockets */
++/* #undef EGD_DEFAULT_SOCKET */
++
++/* Define if fcntl locks affect threads within the process */
++/* #undef FCNTL_IS_GLOBAL */
++
++/* Define if fcntl returns EACCES when F_SETLK is already held */
++/* #undef FCNTL_TRYACQUIRE_EACCES */
++
++/* Define if flock locks affect threads within the process */
++/* #undef FLOCK_IS_GLOBAL */
++
++/* Define if gethostbyaddr is thread safe */
++/* #undef GETHOSTBYADDR_IS_THREAD_SAFE */
++
++/* Define if gethostbyname is thread safe */
++/* #undef GETHOSTBYNAME_IS_THREAD_SAFE */
++
++/* Define if gethostbyname_r has the glibc style */
++#define GETHOSTBYNAME_R_GLIBC2 1
++
++/* Define if gethostbyname_r has the hostent_data for the third argument */
++/* #undef GETHOSTBYNAME_R_HOSTENT_DATA */
++
++/* Define if getservbyname is thread safe */
++/* #undef GETSERVBYNAME_IS_THREAD_SAFE */
++
++/* Define if getservbyname_r has the glibc style */
++#define GETSERVBYNAME_R_GLIBC2 1
++
++/* Define if getservbyname_r has the OSF/1 style */
++/* #undef GETSERVBYNAME_R_OSF1 */
++
++/* Define if getservbyname_r has the Solaris style */
++/* #undef GETSERVBYNAME_R_SOLARIS */
++
++/* Define if accept4 function is supported */
++/* #undef HAVE_ACCEPT4 */
++
++/* Define to 1 if you have `alloca', as a function or macro. */
++#define HAVE_ALLOCA 1
++
++/* Define to 1 if you have <alloca.h> and it should be used (not on Ultrix).
++   */
++#define HAVE_ALLOCA_H 1
++
++/* Define to 1 if you have the <arpa/inet.h> header file. */
++#define HAVE_ARPA_INET_H 1
++
++/* Define if compiler provides atomic builtins */
++#define HAVE_ATOMIC_BUILTINS 1
++
++/* Define if BONE_VERSION is defined in sys/socket.h */
++/* #undef HAVE_BONE_VERSION */
++
++/* Define to 1 if you have the <ByteOrder.h> header file. */
++/* #undef HAVE_BYTEORDER_H */
++
++/* Define to 1 if you have the `calloc' function. */
++#define HAVE_CALLOC 1
++
++/* Define to 1 if you have the <conio.h> header file. */
++/* #undef HAVE_CONIO_H */
++
++/* Define to 1 if you have the `create_area' function. */
++/* #undef HAVE_CREATE_AREA */
++
++/* Define to 1 if you have the `create_sem' function. */
++/* #undef HAVE_CREATE_SEM */
++
++/* Define to 1 if you have the <crypt.h> header file. */
++#define HAVE_CRYPT_H 1
++
++/* Define to 1 if you have the <ctype.h> header file. */
++#define HAVE_CTYPE_H 1
++
++/* Define to 1 if you have the declaration of `sys_siglist', and to 0 if you
++   don't. */
++#define HAVE_DECL_SYS_SIGLIST 1
++
++/* Define to 1 if you have the <dirent.h> header file. */
++#define HAVE_DIRENT_H 1
++
++/* Define to 1 if you have the <dir.h> header file. */
++/* #undef HAVE_DIR_H */
++
++/* Define to 1 if you have the <dlfcn.h> header file. */
++#define HAVE_DLFCN_H 1
++
++/* Define to 1 if you have the <dl.h> header file. */
++/* #undef HAVE_DL_H */
++
++/* Define if dup3 function is supported */
++/* #undef HAVE_DUP3 */
++
++/* Define if EGD is supported */
++/* #undef HAVE_EGD */
++
++/* Define if the epoll interface is supported */
++#define HAVE_EPOLL 1
++
++/* Define if epoll_create1 function is supported */
++/* #undef HAVE_EPOLL_CREATE1 */
++
++/* Define to 1 if you have the <errno.h> header file. */
++#define HAVE_ERRNO_H 1
++
++/* Define to 1 if you have the <fcntl.h> header file. */
++#define HAVE_FCNTL_H 1
++
++/* Define to 1 if you have the `fdatasync' function. */
++#define HAVE_FDATASYNC 1
++
++/* Define to 1 if you have the `flock' function. */
++#define HAVE_FLOCK 1
++
++/* Define to 1 if you have the `fork' function. */
++#define HAVE_FORK 1
++
++/* Define if F_SETLK is defined in fcntl.h */
++#define HAVE_F_SETLK 1
++
++/* Define if getaddrinfo accepts the AI_ADDRCONFIG flag */
++#define HAVE_GAI_ADDRCONFIG 1
++
++/* Define to 1 if you have the `gai_strerror' function. */
++#define HAVE_GAI_STRERROR 1
++
++/* Define if getaddrinfo exists and works well enough for APR */
++#define HAVE_GETADDRINFO 1
++
++/* Define to 1 if you have the `getenv' function. */
++#define HAVE_GETENV 1
++
++/* Define to 1 if you have the `getgrgid_r' function. */
++#define HAVE_GETGRGID_R 1
++
++/* Define to 1 if you have the `getgrnam_r' function. */
++#define HAVE_GETGRNAM_R 1
++
++/* Define to 1 if you have the `gethostbyaddr_r' function. */
++#define HAVE_GETHOSTBYADDR_R 1
++
++/* Define to 1 if you have the `gethostbyname_r' function. */
++#define HAVE_GETHOSTBYNAME_R 1
++
++/* Define to 1 if you have the `getifaddrs' function. */
++#define HAVE_GETIFADDRS 1
++
++/* Define if getnameinfo exists */
++#define HAVE_GETNAMEINFO 1
++
++/* Define to 1 if you have the `getpass' function. */
++#define HAVE_GETPASS 1
++
++/* Define to 1 if you have the `getpassphrase' function. */
++/* #undef HAVE_GETPASSPHRASE */
++
++/* Define to 1 if you have the `getpwnam_r' function. */
++#define HAVE_GETPWNAM_R 1
++
++/* Define to 1 if you have the `getpwuid_r' function. */
++#define HAVE_GETPWUID_R 1
++
++/* Define to 1 if you have the `getrlimit' function. */
++#define HAVE_GETRLIMIT 1
++
++/* Define to 1 if you have the `getservbyname_r' function. */
++#define HAVE_GETSERVBYNAME_R 1
++
++/* Define to 1 if you have the `gmtime_r' function. */
++#define HAVE_GMTIME_R 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define if hstrerror is present */
++/* #undef HAVE_HSTRERROR */
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the <io.h> header file. */
++/* #undef HAVE_IO_H */
++
++/* Define to 1 if you have the `isinf' function. */
++#define HAVE_ISINF 1
++
++/* Define to 1 if you have the `isnan' function. */
++#define HAVE_ISNAN 1
++
++/* Define to 1 if you have the <kernel/OS.h> header file. */
++/* #undef HAVE_KERNEL_OS_H */
++
++/* Define to 1 if you have the `kqueue' function. */
++/* #undef HAVE_KQUEUE */
++
++/* Define to 1 if you have the <langinfo.h> header file. */
++#define HAVE_LANGINFO_H 1
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBADVAPI32 */
++
++/* Define to 1 if you have the `bsd' library (-lbsd). */
++/* #undef HAVE_LIBBSD */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBKERNEL32 */
++
++/* Define to 1 if you have the `msvcrt' library (-lmsvcrt). */
++/* #undef HAVE_LIBMSVCRT */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBRPCRT4 */
++
++/* Define to 1 if you have the `sendfile' library (-lsendfile). */
++/* #undef HAVE_LIBSENDFILE */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBSHELL32 */
++
++/* Define to 1 if you have the `truerand' library (-ltruerand). */
++/* #undef HAVE_LIBTRUERAND */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBWS2_32 */
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the `localtime_r' function. */
++#define HAVE_LOCALTIME_R 1
++
++/* Define if LOCK_EX is defined in sys/file.h */
++#define HAVE_LOCK_EX 1
++
++/* Define to 1 if you have the <mach-o/dyld.h> header file. */
++/* #undef HAVE_MACH_O_DYLD_H */
++
++/* Define to 1 if you have the <malloc.h> header file. */
++#define HAVE_MALLOC_H 1
++
++/* Define if MAP_ANON is defined in sys/mman.h */
++#define HAVE_MAP_ANON 1
++
++/* Define to 1 if you have the `memchr' function. */
++#define HAVE_MEMCHR 1
++
++/* Define to 1 if you have the `memmove' function. */
++#define HAVE_MEMMOVE 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define to 1 if you have the `mkstemp' function. */
++#define HAVE_MKSTEMP 1
++
++/* Define to 1 if you have the `mkstemp64' function. */
++#define HAVE_MKSTEMP64 1
++
++/* Define to 1 if you have the `mmap' function. */
++#define HAVE_MMAP 1
++
++/* Define to 1 if you have the `mmap64' function. */
++#define HAVE_MMAP64 1
++
++/* Define to 1 if you have the `munmap' function. */
++#define HAVE_MUNMAP 1
++
++/* Define to 1 if you have the <netdb.h> header file. */
++#define HAVE_NETDB_H 1
++
++/* Define to 1 if you have the <netinet/in.h> header file. */
++#define HAVE_NETINET_IN_H 1
++
++/* Define to 1 if you have the <netinet/sctp.h> header file. */
++/* #undef HAVE_NETINET_SCTP_H */
++
++/* Define to 1 if you have the <netinet/sctp_uio.h> header file. */
++/* #undef HAVE_NETINET_SCTP_UIO_H */
++
++/* Defined if netinet/tcp.h is present */
++#define HAVE_NETINET_TCP_H 1
++
++/* Define to 1 if you have the <net/errno.h> header file. */
++/* #undef HAVE_NET_ERRNO_H */
++
++/* Define to 1 if you have the `nl_langinfo' function. */
++#define HAVE_NL_LANGINFO 1
++
++/* Define to 1 if you have the <os2.h> header file. */
++/* #undef HAVE_OS2_H */
++
++/* Define to 1 if you have the <osreldate.h> header file. */
++/* #undef HAVE_OSRELDATE_H */
++
++/* Define to 1 if you have the <OS.h> header file. */
++/* #undef HAVE_OS_H */
++
++/* Define to 1 if you have the `poll' function. */
++#define HAVE_POLL 1
++
++/* Define if POLLIN is defined */
++#define HAVE_POLLIN 1
++
++/* Define to 1 if you have the <poll.h> header file. */
++#define HAVE_POLL_H 1
++
++/* Define to 1 if you have the `port_create' function. */
++/* #undef HAVE_PORT_CREATE */
++
++/* Define to 1 if you have the <process.h> header file. */
++/* #undef HAVE_PROCESS_H */
++
++/* Define to 1 if you have the `pthread_attr_setguardsize' function. */
++#define HAVE_PTHREAD_ATTR_SETGUARDSIZE 1
++
++/* Define to 1 if you have the <pthread.h> header file. */
++#define HAVE_PTHREAD_H 1
++
++/* Define to 1 if you have the `pthread_key_delete' function. */
++#define HAVE_PTHREAD_KEY_DELETE 1
++
++/* Define to 1 if you have the `pthread_mutexattr_setpshared' function. */
++#define HAVE_PTHREAD_MUTEXATTR_SETPSHARED 1
++
++/* Define if recursive pthread mutexes are available */
++#define HAVE_PTHREAD_MUTEX_RECURSIVE 1
++
++/* Define if cross-process robust mutexes are available */
++#define HAVE_PTHREAD_MUTEX_ROBUST 1
++
++/* Define if PTHREAD_PROCESS_SHARED is defined in pthread.h */
++#define HAVE_PTHREAD_PROCESS_SHARED 1
++
++/* Define if pthread rwlocks are available */
++#define HAVE_PTHREAD_RWLOCKS 1
++
++/* Define to 1 if you have the `pthread_rwlock_init' function. */
++#define HAVE_PTHREAD_RWLOCK_INIT 1
++
++/* Define to 1 if you have the `pthread_yield' function. */
++#define HAVE_PTHREAD_YIELD 1
++
++/* Define to 1 if you have the `putenv' function. */
++#define HAVE_PUTENV 1
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `readdir64_r' function. */
++#define HAVE_READDIR64_R 1
++
++/* Define to 1 if you have the <sched.h> header file. */
++/* #undef HAVE_SCHED_H */
++
++/* Define to 1 if you have the `sched_yield' function. */
++/* #undef HAVE_SCHED_YIELD */
++
++/* Define to 1 if you have the <semaphore.h> header file. */
++#define HAVE_SEMAPHORE_H 1
++
++/* Define to 1 if you have the `semctl' function. */
++#define HAVE_SEMCTL 1
++
++/* Define to 1 if you have the `semget' function. */
++#define HAVE_SEMGET 1
++
++/* Define to 1 if you have the `sem_close' function. */
++#define HAVE_SEM_CLOSE 1
++
++/* Define to 1 if you have the `sem_post' function. */
++#define HAVE_SEM_POST 1
++
++/* Define if SEM_UNDO is defined in sys/sem.h */
++#define HAVE_SEM_UNDO 1
++
++/* Define to 1 if you have the `sem_unlink' function. */
++#define HAVE_SEM_UNLINK 1
++
++/* Define to 1 if you have the `sem_wait' function. */
++#define HAVE_SEM_WAIT 1
++
++/* Define to 1 if you have the `sendfile' function. */
++#define HAVE_SENDFILE 1
++
++/* Define to 1 if you have the `sendfile64' function. */
++#define HAVE_SENDFILE64 1
++
++/* Define to 1 if you have the `sendfilev' function. */
++/* #undef HAVE_SENDFILEV */
++
++/* Define to 1 if you have the `sendfilev64' function. */
++/* #undef HAVE_SENDFILEV64 */
++
++/* Define to 1 if you have the `send_file' function. */
++/* #undef HAVE_SEND_FILE */
++
++/* Define to 1 if you have the `setenv' function. */
++#define HAVE_SETENV 1
++
++/* Define to 1 if you have the `setrlimit' function. */
++#define HAVE_SETRLIMIT 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define to 1 if you have the `set_h_errno' function. */
++/* #undef HAVE_SET_H_ERRNO */
++
++/* Define to 1 if you have the `shmat' function. */
++#define HAVE_SHMAT 1
++
++/* Define to 1 if you have the `shmctl' function. */
++#define HAVE_SHMCTL 1
++
++/* Define to 1 if you have the `shmdt' function. */
++#define HAVE_SHMDT 1
++
++/* Define to 1 if you have the `shmget' function. */
++#define HAVE_SHMGET 1
++
++/* Define to 1 if you have the `shm_open' function. */
++#define HAVE_SHM_OPEN 1
++
++/* Define to 1 if you have the `shm_unlink' function. */
++#define HAVE_SHM_UNLINK 1
++
++/* Define to 1 if you have the `sigaction' function. */
++#define HAVE_SIGACTION 1
++
++/* Define to 1 if you have the <signal.h> header file. */
++#define HAVE_SIGNAL_H 1
++
++/* Define to 1 if you have the `sigsuspend' function. */
++#define HAVE_SIGSUSPEND 1
++
++/* Define to 1 if you have the `sigwait' function. */
++#define HAVE_SIGWAIT 1
++
++/* Whether you have socklen_t */
++#define HAVE_SOCKLEN_T 1
++
++/* Define if the SOCK_CLOEXEC flag is supported */
++/* #undef HAVE_SOCK_CLOEXEC */
++
++/* Define if SO_ACCEPTFILTER is defined in sys/socket.h */
++/* #undef HAVE_SO_ACCEPTFILTER */
++
++/* Define to 1 if you have the <stdarg.h> header file. */
++#define HAVE_STDARG_H 1
++
++/* Define to 1 if you have the <stddef.h> header file. */
++#define HAVE_STDDEF_H 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdio.h> header file. */
++#define HAVE_STDIO_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the `strcasecmp' function. */
++#define HAVE_STRCASECMP 1
++
++/* Define to 1 if you have the `strdup' function. */
++#define HAVE_STRDUP 1
++
++/* Define to 1 if you have the `strerror_r' function. */
++#define HAVE_STRERROR_R 1
++
++/* Define to 1 if you have the `stricmp' function. */
++/* #undef HAVE_STRICMP */
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `strncasecmp' function. */
++#define HAVE_STRNCASECMP 1
++
++/* Define to 1 if you have the `strnicmp' function. */
++/* #undef HAVE_STRNICMP */
++
++/* Define to 1 if you have the `strstr' function. */
++#define HAVE_STRSTR 1
++
++/* Define if struct impreq was found */
++#define HAVE_STRUCT_IPMREQ 1
++
++/* Define to 1 if `st_atimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_ATIMENSEC */
++
++/* Define to 1 if `st_atime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_ATIME_N */
++
++/* Define to 1 if `st_atim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_ATIM_TV_NSEC 1
++
++/* Define to 1 if `st_blocks' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_BLOCKS 1
++
++/* Define to 1 if `st_ctimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_CTIMENSEC */
++
++/* Define to 1 if `st_ctime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_CTIME_N */
++
++/* Define to 1 if `st_ctim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_CTIM_TV_NSEC 1
++
++/* Define to 1 if `st_mtimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_MTIMENSEC */
++
++/* Define to 1 if `st_mtime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_MTIME_N */
++
++/* Define to 1 if `st_mtim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
++
++/* Define to 1 if `tm_gmtoff' is member of `struct tm'. */
++#define HAVE_STRUCT_TM_TM_GMTOFF 1
++
++/* Define to 1 if `__tm_gmtoff' is member of `struct tm'. */
++/* #undef HAVE_STRUCT_TM___TM_GMTOFF */
++
++/* Define to 1 if you have the <sysapi.h> header file. */
++/* #undef HAVE_SYSAPI_H */
++
++/* Define to 1 if you have the <sysgtime.h> header file. */
++/* #undef HAVE_SYSGTIME_H */
++
++/* Define to 1 if you have the <sys/file.h> header file. */
++#define HAVE_SYS_FILE_H 1
++
++/* Define to 1 if you have the <sys/ioctl.h> header file. */
++#define HAVE_SYS_IOCTL_H 1
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/mman.h> header file. */
++#define HAVE_SYS_MMAN_H 1
++
++/* Define to 1 if you have the <sys/mutex.h> header file. */
++/* #undef HAVE_SYS_MUTEX_H */
++
++/* Define to 1 if you have the <sys/param.h> header file. */
++#define HAVE_SYS_PARAM_H 1
++
++/* Define to 1 if you have the <sys/poll.h> header file. */
++#define HAVE_SYS_POLL_H 1
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/select.h> header file. */
++#define HAVE_SYS_SELECT_H 1
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/sendfile.h> header file. */
++#define HAVE_SYS_SENDFILE_H 1
++
++/* Define to 1 if you have the <sys/shm.h> header file. */
++#define HAVE_SYS_SHM_H 1
++
++/* Define to 1 if you have the <sys/signal.h> header file. */
++#define HAVE_SYS_SIGNAL_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/sockio.h> header file. */
++/* #undef HAVE_SYS_SOCKIO_H */
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/sysctl.h> header file. */
++#define HAVE_SYS_SYSCTL_H 1
++
++/* Define to 1 if you have the <sys/syslimits.h> header file. */
++/* #undef HAVE_SYS_SYSLIMITS_H */
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have the <sys/uio.h> header file. */
++#define HAVE_SYS_UIO_H 1
++
++/* Define to 1 if you have the <sys/un.h> header file. */
++#define HAVE_SYS_UN_H 1
++
++/* Define to 1 if you have the <sys/uuid.h> header file. */
++/* #undef HAVE_SYS_UUID_H */
++
++/* Define to 1 if you have the <sys/wait.h> header file. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define if TCP_CORK is defined in netinet/tcp.h */
++#define HAVE_TCP_CORK 1
++
++/* Define if TCP_NODELAY and TCP_CORK can be enabled at the same time */
++#define HAVE_TCP_NODELAY_WITH_CORK 1
++
++/* Define if TCP_NOPUSH is defined in netinet/tcp.h */
++/* #undef HAVE_TCP_NOPUSH */
++
++/* Define to 1 if you have the <termios.h> header file. */
++#define HAVE_TERMIOS_H 1
++
++/* Define to 1 if you have the <time.h> header file. */
++#define HAVE_TIME_H 1
++
++/* Define to 1 if you have the <tpfeq.h> header file. */
++/* #undef HAVE_TPFEQ_H */
++
++/* Define to 1 if you have the <tpfio.h> header file. */
++/* #undef HAVE_TPFIO_H */
++
++/* Define if truerand is supported */
++/* #undef HAVE_TRUERAND */
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Define to 1 if you have the <unix.h> header file. */
++/* #undef HAVE_UNIX_H */
++
++/* Define to 1 if you have the `unsetenv' function. */
++#define HAVE_UNSETENV 1
++
++/* Define to 1 if you have the `utime' function. */
++#define HAVE_UTIME 1
++
++/* Define to 1 if you have the `utimes' function. */
++#define HAVE_UTIMES 1
++
++/* Define to 1 if you have the `uuid_create' function. */
++/* #undef HAVE_UUID_CREATE */
++
++/* Define to 1 if you have the `uuid_generate' function. */
++#define HAVE_UUID_GENERATE 1
++
++/* Define to 1 if you have the <uuid.h> header file. */
++/* #undef HAVE_UUID_H */
++
++/* Define to 1 if you have the <uuid/uuid.h> header file. */
++/* #undef HAVE_UUID_UUID_H */
++
++/* Define if C compiler supports VLA */
++#define HAVE_VLA 1
++
++/* Define to 1 if you have the `waitpid' function. */
++#define HAVE_WAITPID 1
++
++/* Define to 1 if you have the <windows.h> header file. */
++/* #undef HAVE_WINDOWS_H */
++
++/* Define to 1 if you have the <winsock2.h> header file. */
++/* #undef HAVE_WINSOCK2_H */
++
++/* Define to 1 if you have the `writev' function. */
++#define HAVE_WRITEV 1
++
++/* Define for z/OS pthread API nuances */
++/* #undef HAVE_ZOS_PTHREADS */
++
++/* Define if EAI_ error codes from getaddrinfo are negative */
++#define NEGATIVE_EAI 1
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Define if POSIX semaphores affect threads within the process */
++/* #undef POSIXSEM_IS_GLOBAL */
++
++/* Define on PowerPC 405 where errata 77 applies */
++/* #undef PPC405_ERRATA */
++
++/* Define if pthread_attr_getdetachstate() has one arg */
++/* #undef PTHREAD_ATTR_GETDETACHSTATE_TAKES_ONE_ARG */
++
++/* Define if pthread_getspecific() has two args */
++/* #undef PTHREAD_GETSPECIFIC_TAKES_TWO_ARGS */
++
++/* Define if readdir is thread safe */
++/* #undef READDIR_IS_THREAD_SAFE */
++
++/* Define to 1 if the `setpgrp' function takes no argument. */
++#define SETPGRP_VOID 1
++
++/* */
++/* #undef SIGWAIT_TAKES_ONE_ARG */
++
++/* The size of `char', as computed by sizeof. */
++#define SIZEOF_CHAR 1
++
++/* The size of `int', as computed by sizeof. */
++#define SIZEOF_INT 4
++
++/* The size of `long', as computed by sizeof. */
++#define SIZEOF_LONG 4
++
++/* The size of `long long', as computed by sizeof. */
++#define SIZEOF_LONG_LONG 8
++
++/* The size of off_t */
++#define SIZEOF_OFF_T 4
++
++/* The size of pid_t */
++#define SIZEOF_PID_T 4
++
++/* The size of `short', as computed by sizeof. */
++#define SIZEOF_SHORT 2
++
++/* The size of size_t */
++#define SIZEOF_SIZE_T 4
++
++/* The size of ssize_t */
++#define SIZEOF_SSIZE_T 4
++
++/* The size of struct iovec */
++#define SIZEOF_STRUCT_IOVEC 8
++
++/* The size of `void*', as computed by sizeof. */
++#define SIZEOF_VOIDP 4
++
++/* If using the C implementation of alloca, define if you know the
++   direction of stack growth for your system; otherwise it will be
++   automatically deduced at runtime.
++	STACK_DIRECTION > 0 => grows toward higher addresses
++	STACK_DIRECTION < 0 => grows toward lower addresses
++	STACK_DIRECTION = 0 => direction of growth unknown */
++/* #undef STACK_DIRECTION */
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Define if strerror returns int */
++/* #undef STRERROR_R_RC_INT */
++
++/* Define if SysV semaphores affect threads within the process */
++/* #undef SYSVSEM_IS_GLOBAL */
++
++/* Define if use of generic atomics is requested */
++#define USE_ATOMICS_GENERIC 1
++
++/* Define if BeOS Semaphores will be used */
++/* #undef USE_BEOSSEM */
++
++/* Define if SVR4-style fcntl() will be used */
++/* #undef USE_FCNTL_SERIALIZE */
++
++/* Define if 4.2BSD-style flock() will be used */
++/* #undef USE_FLOCK_SERIALIZE */
++
++/* Define if BeOS areas will be used */
++/* #undef USE_SHMEM_BEOS */
++
++/* Define if BeOS areas will be used */
++/* #undef USE_SHMEM_BEOS_ANON */
++
++/* Define if 4.4BSD-style mmap() via MAP_ANON will be used */
++#define USE_SHMEM_MMAP_ANON 1
++
++/* Define if mmap() via POSIX.1 shm_open() on temporary file will be used */
++/* #undef USE_SHMEM_MMAP_SHM */
++
++/* Define if Classical mmap() on temporary file will be used */
++/* #undef USE_SHMEM_MMAP_TMP */
++
++/* Define if SVR4-style mmap() on /dev/zero will be used */
++/* #undef USE_SHMEM_MMAP_ZERO */
++
++/* Define if OS/2 DosAllocSharedMem() will be used */
++/* #undef USE_SHMEM_OS2 */
++
++/* Define if OS/2 DosAllocSharedMem() will be used */
++/* #undef USE_SHMEM_OS2_ANON */
++
++/* Define if SysV IPC shmget() will be used */
++#define USE_SHMEM_SHMGET 1
++
++/* Define if SysV IPC shmget() will be used */
++/* #undef USE_SHMEM_SHMGET_ANON */
++
++/* Define if Windows shared memory will be used */
++/* #undef USE_SHMEM_WIN32 */
++
++/* Define if Windows CreateFileMapping() will be used */
++/* #undef USE_SHMEM_WIN32_ANON */
++
++/* Define if SysV IPC semget() will be used */
++#define USE_SYSVSEM_SERIALIZE 1
++
++/* Define if apr_wait_for_io_or_timeout() uses poll(2) */
++#define WAITIO_USES_POLL 1
++
++/* Define to 1 if your processor stores words with the most significant byte
++   first (like Motorola and SPARC, unlike Intel and VAX). */
++/* #undef WORDS_BIGENDIAN */
++
++/* Define to 1 if on AIX 3.
++   System headers sometimes define this.
++   We just want to avoid a redefinition error message.  */
++#ifndef _ALL_SOURCE
++/* # undef _ALL_SOURCE */
++#endif
++
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Enable extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to `int' if <sys/types.h> doesn't define. */
++/* #undef gid_t */
++
++/* Define to `__inline__' or `__inline' if that's what the C compiler
++   calls it, or to nothing if 'inline' is not supported under any name.  */
++#ifndef __cplusplus
++/* #undef inline */
++#endif
++
++/* Define to `long int' if <sys/types.h> does not define. */
++/* #undef off_t */
++
++/* Define to `int' if <sys/types.h> does not define. */
++/* #undef pid_t */
++
++/* Define to `unsigned int' if <sys/types.h> does not define. */
++/* #undef size_t */
++
++/* Define to `int' if <sys/types.h> does not define. */
++/* #undef ssize_t */
++
++/* Define to `int' if <sys/types.h> doesn't define. */
++/* #undef uid_t */
++
++
++/* switch this on if we have a BeOS version below BONE */
++#if BEOS && !HAVE_BONE_VERSION
++#define BEOS_R5 1
++#else
++#define BEOS_BONE 1
++#endif
++
++/*
++ * Include common private declarations.
++ */
++#include "../apr_private_common.h"
++#endif /* APR_PRIVATE_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/armv7l/include/apr.h incubator-pagespeed-mod/third_party/apr/gen/arch/linux/armv7l/include/apr.h
+--- incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/armv7l/include/apr.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/apr/gen/arch/linux/armv7l/include/apr.h	2020-05-11 17:48:18.119745370 +0100
+@@ -0,0 +1,512 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++
++#ifndef APR_H
++#define APR_H
++
++/* GENERATED FILE WARNING!  DO NOT EDIT apr.h
++ *
++ * You must modify apr.h.in instead.
++ *
++ * And please, make an effort to stub apr.hw and apr.hnw in the process.
++ */
++
++/**
++ * @file apr.h
++ * @brief APR Platform Definitions
++ * @remark This is a generated header generated from include/apr.h.in by
++ * ./configure, or copied from include/apr.hw or include/apr.hnw
++ * for Win32 or Netware by those build environments, respectively.
++ */
++
++/**
++ * @defgroup APR Apache Portability Runtime library
++ * @{
++ */
++/**
++ * @defgroup apr_platform Platform Definitions
++ * @{
++ * @warning
++ * <strong><em>The actual values of macros and typedefs on this page<br>
++ * are platform specific and should NOT be relied upon!</em></strong>
++ */
++
++/* So that we can use inline on some critical functions, and use
++ * GNUC attributes (such as to get -Wall warnings for printf-like
++ * functions).  Only do this in gcc 2.7 or later ... it may work
++ * on earlier stuff, but why chance it.
++ *
++ * We've since discovered that the gcc shipped with NeXT systems
++ * as "cc" is completely broken.  It claims to be __GNUC__ and so
++ * on, but it doesn't implement half of the things that __GNUC__
++ * means.  In particular it's missing inline and the __attribute__
++ * stuff.  So we hack around it.  PR#1613. -djg
++ */
++#if !defined(__GNUC__) || __GNUC__ < 2 || \
++    (__GNUC__ == 2 && __GNUC_MINOR__ < 7) ||\
++    defined(NEXT)
++#ifndef __attribute__
++#define __attribute__(__x)
++#endif
++#define APR_INLINE
++#define APR_HAS_INLINE		0
++#else
++#define APR_INLINE __inline__
++#define APR_HAS_INLINE		1
++#endif
++
++#define APR_HAVE_ARPA_INET_H     1
++#define APR_HAVE_CONIO_H         0
++#define APR_HAVE_CRYPT_H         1
++#define APR_HAVE_CTYPE_H         1
++#define APR_HAVE_DIRENT_H        1
++#define APR_HAVE_ERRNO_H         1
++#define APR_HAVE_FCNTL_H         1
++#define APR_HAVE_IO_H            0
++#define APR_HAVE_LIMITS_H        1
++#define APR_HAVE_NETDB_H         1
++#define APR_HAVE_NETINET_IN_H    1
++#define APR_HAVE_NETINET_SCTP_H  0
++#define APR_HAVE_NETINET_SCTP_UIO_H 0
++#define APR_HAVE_NETINET_TCP_H   1
++#define APR_HAVE_PTHREAD_H       1
++#define APR_HAVE_SEMAPHORE_H     1
++#define APR_HAVE_SIGNAL_H        1
++#define APR_HAVE_STDARG_H        1
++#define APR_HAVE_STDINT_H        1
++#define APR_HAVE_STDIO_H         1
++#define APR_HAVE_STDLIB_H        1
++#define APR_HAVE_STRING_H        1
++#define APR_HAVE_STRINGS_H       1
++#define APR_HAVE_SYS_IOCTL_H     1
++#define APR_HAVE_SYS_SENDFILE_H  1
++#define APR_HAVE_SYS_SIGNAL_H    1
++#define APR_HAVE_SYS_SOCKET_H    1
++#define APR_HAVE_SYS_SOCKIO_H    0
++#define APR_HAVE_SYS_SYSLIMITS_H 0
++#define APR_HAVE_SYS_TIME_H      1
++#define APR_HAVE_SYS_TYPES_H     1
++#define APR_HAVE_SYS_UIO_H       1
++#define APR_HAVE_SYS_UN_H        1
++#define APR_HAVE_SYS_WAIT_H      1
++#define APR_HAVE_TIME_H          1
++#define APR_HAVE_UNISTD_H        1
++#define APR_HAVE_WINDOWS_H       0
++#define APR_HAVE_WINSOCK2_H      0
++
++/** @} */
++/** @} */
++
++/* We don't include our conditional headers within the doxyblocks
++ * or the extern "C" namespace
++ */
++
++#if APR_HAVE_WINDOWS_H
++#include <windows.h>
++#endif
++
++#if APR_HAVE_WINSOCK2_H
++#include <winsock2.h>
++#endif
++
++#if APR_HAVE_SYS_TYPES_H
++#include <sys/types.h>
++#endif
++
++#if APR_HAVE_SYS_SOCKET_H
++#include <sys/socket.h>
++#endif
++
++#if defined(__cplusplus) && !defined(__STDC_CONSTANT_MACROS)
++/* C99 7.18.4 requires that stdint.h only exposes INT64_C
++ * and UINT64_C for C++ implementations if this is defined: */
++#define __STDC_CONSTANT_MACROS
++#endif
++
++#if APR_HAVE_STDINT_H
++#include <stdint.h>
++#endif
++
++#if APR_HAVE_SYS_WAIT_H
++#include <sys/wait.h>
++#endif
++
++#ifdef OS2
++#define INCL_DOS
++#define INCL_DOSERRORS
++#include <os2.h>
++#endif
++
++/* header files for PATH_MAX, _POSIX_PATH_MAX */
++#if APR_HAVE_LIMITS_H
++#include <limits.h>
++#else
++#if APR_HAVE_SYS_SYSLIMITS_H
++#include <sys/syslimits.h>
++#endif
++#endif
++
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @addtogroup apr_platform
++ * @ingroup APR
++ * @{
++ */
++
++#define APR_HAVE_SHMEM_MMAP_TMP     1
++#define APR_HAVE_SHMEM_MMAP_SHM     1
++#define APR_HAVE_SHMEM_MMAP_ZERO    1
++#define APR_HAVE_SHMEM_SHMGET_ANON  1
++#define APR_HAVE_SHMEM_SHMGET       1
++#define APR_HAVE_SHMEM_MMAP_ANON    1
++#define APR_HAVE_SHMEM_BEOS         0
++
++#define APR_USE_SHMEM_MMAP_TMP     0
++#define APR_USE_SHMEM_MMAP_SHM     0
++#define APR_USE_SHMEM_MMAP_ZERO    0
++#define APR_USE_SHMEM_SHMGET_ANON  0
++#define APR_USE_SHMEM_SHMGET       1
++#define APR_USE_SHMEM_MMAP_ANON    1
++#define APR_USE_SHMEM_BEOS         0
++
++#define APR_USE_FLOCK_SERIALIZE           0
++#define APR_USE_SYSVSEM_SERIALIZE         1
++#define APR_USE_POSIXSEM_SERIALIZE        0
++#define APR_USE_FCNTL_SERIALIZE           0
++#define APR_USE_PROC_PTHREAD_SERIALIZE    0
++#define APR_USE_PTHREAD_SERIALIZE         1
++
++#define APR_HAS_FLOCK_SERIALIZE           1
++#define APR_HAS_SYSVSEM_SERIALIZE         1
++#define APR_HAS_POSIXSEM_SERIALIZE        1
++#define APR_HAS_FCNTL_SERIALIZE           1
++#define APR_HAS_PROC_PTHREAD_SERIALIZE    1
++
++#define APR_PROCESS_LOCK_IS_GLOBAL        0
++
++#define APR_HAVE_CORKABLE_TCP   1
++#define APR_HAVE_GETRLIMIT      1
++#define APR_HAVE_IN_ADDR        1
++#define APR_HAVE_INET_ADDR      1
++#define APR_HAVE_INET_NETWORK   1
++#define APR_HAVE_IPV6           1
++#define APR_HAVE_MEMMOVE        1
++#define APR_HAVE_SETRLIMIT      1
++#define APR_HAVE_SIGACTION      1
++#define APR_HAVE_SIGSUSPEND     1
++#define APR_HAVE_SIGWAIT        1
++#define APR_HAVE_SA_STORAGE     1
++#define APR_HAVE_STRCASECMP     1
++#define APR_HAVE_STRDUP         1
++#define APR_HAVE_STRICMP        0
++#define APR_HAVE_STRNCASECMP    1
++#define APR_HAVE_STRNICMP       0
++#define APR_HAVE_STRSTR         1
++#define APR_HAVE_MEMCHR         1
++#define APR_HAVE_STRUCT_RLIMIT  1
++#define APR_HAVE_UNION_SEMUN    0
++#define APR_HAVE_SCTP           0
++#define APR_HAVE_IOVEC          1
++
++/*  APR Feature Macros */
++#define APR_HAS_SHARED_MEMORY     1
++#define APR_HAS_THREADS           1
++#define APR_HAS_SENDFILE          1
++#define APR_HAS_MMAP              1
++#define APR_HAS_FORK              1
++#define APR_HAS_RANDOM            1
++#define APR_HAS_OTHER_CHILD       1
++#define APR_HAS_DSO               1
++#define APR_HAS_SO_ACCEPTFILTER   0
++#define APR_HAS_UNICODE_FS        0
++#define APR_HAS_PROC_INVOKED      0
++#define APR_HAS_USER              1
++#define APR_HAS_LARGE_FILES       1
++#define APR_HAS_XTHREAD_FILES     0
++#define APR_HAS_OS_UUID           0
++
++#define APR_PROCATTR_USER_SET_REQUIRES_PASSWORD 0
++
++/* APR sets APR_FILES_AS_SOCKETS to 1 on systems where it is possible
++ * to poll on files/pipes.
++ */
++#define APR_FILES_AS_SOCKETS      1
++
++/* This macro indicates whether or not EBCDIC is the native character set.
++ */
++#define APR_CHARSET_EBCDIC        0
++
++/* If we have a TCP implementation that can be "corked", what flag
++ * do we use?
++ */
++#define APR_TCP_NOPUSH_FLAG       TCP_CORK
++
++/* Is the TCP_NODELAY socket option inherited from listening sockets?
++*/
++#define APR_TCP_NODELAY_INHERITED 1
++
++/* Is the O_NONBLOCK flag inherited from listening sockets?
++*/
++#define APR_O_NONBLOCK_INHERITED 0
++
++/* Typedefs that APR needs. */
++
++typedef  unsigned char           apr_byte_t;
++
++typedef  short           apr_int16_t;
++typedef  unsigned short  apr_uint16_t;
++
++typedef  int             apr_int32_t;
++typedef  unsigned int    apr_uint32_t;
++
++typedef  long long            apr_int64_t;
++typedef  unsigned long long   apr_uint64_t;
++
++typedef  size_t          apr_size_t;
++typedef  ssize_t         apr_ssize_t;
++typedef  off64_t           apr_off_t;
++typedef  socklen_t       apr_socklen_t;
++typedef  unsigned long           apr_ino_t;
++
++#define APR_SIZEOF_VOIDP 4
++
++#if APR_SIZEOF_VOIDP == 8
++typedef  apr_uint64_t            apr_uintptr_t;
++#else
++typedef  apr_uint32_t            apr_uintptr_t;
++#endif
++
++/* Are we big endian? */
++#define APR_IS_BIGENDIAN	0
++
++/* Mechanisms to properly type numeric literals */
++#define APR_INT64_C(val) INT64_C(val)
++#define APR_UINT64_C(val) UINT64_C(val)
++
++#ifdef INT16_MIN
++#define APR_INT16_MIN   INT16_MIN
++#else
++#define APR_INT16_MIN   (-0x7fff - 1)
++#endif
++
++#ifdef INT16_MAX
++#define APR_INT16_MAX  INT16_MAX
++#else
++#define APR_INT16_MAX   (0x7fff)
++#endif
++
++#ifdef UINT16_MAX
++#define APR_UINT16_MAX  UINT16_MAX
++#else
++#define APR_UINT16_MAX  (0xffff)
++#endif
++
++#ifdef INT32_MIN
++#define APR_INT32_MIN   INT32_MIN
++#else
++#define APR_INT32_MIN   (-0x7fffffff - 1)
++#endif
++
++#ifdef INT32_MAX
++#define APR_INT32_MAX  INT32_MAX
++#else
++#define APR_INT32_MAX  0x7fffffff
++#endif
++
++#ifdef UINT32_MAX
++#define APR_UINT32_MAX  UINT32_MAX
++#else
++#define APR_UINT32_MAX  (0xffffffffU)
++#endif
++
++#ifdef INT64_MIN
++#define APR_INT64_MIN   INT64_MIN
++#else
++#define APR_INT64_MIN   (APR_INT64_C(-0x7fffffffffffffff) - 1)
++#endif
++
++#ifdef INT64_MAX
++#define APR_INT64_MAX   INT64_MAX
++#else
++#define APR_INT64_MAX   APR_INT64_C(0x7fffffffffffffff)
++#endif
++
++#ifdef UINT64_MAX
++#define APR_UINT64_MAX  UINT64_MAX
++#else
++#define APR_UINT64_MAX  APR_UINT64_C(0xffffffffffffffff)
++#endif
++
++#define APR_SIZE_MAX    (~((apr_size_t)0))
++
++
++/* Definitions that APR programs need to work properly. */
++
++/**
++ * APR public API wrap for C++ compilers.
++ */
++#ifdef __cplusplus
++#define APR_BEGIN_DECLS     extern "C" {
++#define APR_END_DECLS       }
++#else
++#define APR_BEGIN_DECLS
++#define APR_END_DECLS
++#endif
++
++/**
++ * Thread callbacks from APR functions must be declared with APR_THREAD_FUNC,
++ * so that they follow the platform's calling convention.
++ * <PRE>
++ *
++ * void* APR_THREAD_FUNC my_thread_entry_fn(apr_thread_t *thd, void *data);
++ *
++ * </PRE>
++ */
++#define APR_THREAD_FUNC
++
++/**
++ * The public APR functions are declared with APR_DECLARE(), so they may
++ * use the most appropriate calling convention.  Public APR functions with
++ * variable arguments must use APR_DECLARE_NONSTD().
++ *
++ * @remark Both the declaration and implementations must use the same macro.
++ *
++ * <PRE>
++ * APR_DECLARE(rettype) apr_func(args)
++ * </PRE>
++ * @see APR_DECLARE_NONSTD @see APR_DECLARE_DATA
++ * @remark Note that when APR compiles the library itself, it passes the
++ * symbol -DAPR_DECLARE_EXPORT to the compiler on some platforms (e.g. Win32)
++ * to export public symbols from the dynamic library build.\n
++ * The user must define the APR_DECLARE_STATIC when compiling to target
++ * the static APR library on some platforms (e.g. Win32.)  The public symbols
++ * are neither exported nor imported when APR_DECLARE_STATIC is defined.\n
++ * By default, compiling an application and including the APR public
++ * headers, without defining APR_DECLARE_STATIC, will prepare the code to be
++ * linked to the dynamic library.
++ */
++#define APR_DECLARE(type)            type
++
++/**
++ * The public APR functions using variable arguments are declared with
++ * APR_DECLARE_NONSTD(), as they must follow the C language calling convention.
++ * @see APR_DECLARE @see APR_DECLARE_DATA
++ * @remark Both the declaration and implementations must use the same macro.
++ * <PRE>
++ *
++ * APR_DECLARE_NONSTD(rettype) apr_func(args, ...);
++ *
++ * </PRE>
++ */
++#define APR_DECLARE_NONSTD(type)     type
++
++/**
++ * The public APR variables are declared with AP_MODULE_DECLARE_DATA.
++ * This assures the appropriate indirection is invoked at compile time.
++ * @see APR_DECLARE @see APR_DECLARE_NONSTD
++ * @remark Note that the declaration and implementations use different forms,
++ * but both must include the macro.
++ *
++ * <PRE>
++ *
++ * extern APR_DECLARE_DATA type apr_variable;\n
++ * APR_DECLARE_DATA type apr_variable = value;
++ *
++ * </PRE>
++ */
++#define APR_DECLARE_DATA
++
++/* Define APR_SSIZE_T_FMT.
++ * If ssize_t is an integer we define it to be "d",
++ * if ssize_t is a long int we define it to be "ld",
++ * if ssize_t is neither we declare an error here.
++ * I looked for a better way to define this here, but couldn't find one, so
++ * to find the logic for this definition search for "ssize_t_fmt" in
++ * configure.in.
++ */
++#define APR_SSIZE_T_FMT "d"
++
++/* And APR_SIZE_T_FMT */
++#define APR_SIZE_T_FMT "u"
++
++/* And APR_OFF_T_FMT */
++#define APR_OFF_T_FMT APR_INT64_T_FMT
++
++/* And APR_PID_T_FMT */
++#define APR_PID_T_FMT "d"
++
++/* And APR_INT64_T_FMT */
++#define APR_INT64_T_FMT "lld"
++
++/* And APR_UINT64_T_FMT */
++#define APR_UINT64_T_FMT "llu"
++
++/* And APR_UINT64_T_HEX_FMT */
++#define APR_UINT64_T_HEX_FMT "llx"
++
++/* Does the proc mutex lock threads too */
++#define APR_PROC_MUTEX_IS_GLOBAL      0
++
++/* Local machine definition for console and log output. */
++#define APR_EOL_STR              "\n"
++
++#if APR_HAVE_SYS_WAIT_H
++#ifdef WEXITSTATUS
++#define apr_wait_t       int
++#else
++#define apr_wait_t       union wait
++#define WEXITSTATUS(status)    (int)((status).w_retcode)
++#define WTERMSIG(status)       (int)((status).w_termsig)
++#endif /* !WEXITSTATUS */
++#elif defined(__MINGW32__)
++typedef int apr_wait_t;
++#endif /* HAVE_SYS_WAIT_H */
++
++#if defined(PATH_MAX)
++#define APR_PATH_MAX       PATH_MAX
++#elif defined(_POSIX_PATH_MAX)
++#define APR_PATH_MAX       _POSIX_PATH_MAX
++#else
++#error no decision has been made on APR_PATH_MAX for your platform
++#endif
++
++#define APR_DSOPATH "LD_LIBRARY_PATH"
++
++/** @} */
++
++/* Definitions that only Win32 programs need to compile properly. */
++
++/* XXX These simply don't belong here, perhaps in apr_portable.h
++ * based on some APR_HAVE_PID/GID/UID?
++ */
++#ifdef __MINGW32__
++#ifndef __GNUC__
++typedef  int         pid_t;
++#endif
++typedef  int         uid_t;
++typedef  int         gid_t;
++#endif
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* APR_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/armv7l/include/apr_private.h incubator-pagespeed-mod/third_party/apr/gen/arch/linux/armv7l/include/apr_private.h
+--- incubator-pagespeed-mod.orig/third_party/apr/gen/arch/linux/armv7l/include/apr_private.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/apr/gen/arch/linux/armv7l/include/apr_private.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,938 @@
++/* include/arch/unix/apr_private.h.  Generated from apr_private.h.in by configure.  */
++/* include/arch/unix/apr_private.h.in.  Generated from configure.in by autoheader.  */
++
++
++#ifndef APR_PRIVATE_H
++#define APR_PRIVATE_H
++
++
++/* Define as function which can be used for conversion of strings to
++   apr_int64_t */
++#define APR_INT64_STRFN strtoll
++
++/* Define as function used for conversion of strings to apr_off_t */
++#define APR_OFF_T_STRFN strtoll
++
++/* Define to one of `_getb67', `GETB67', `getb67' for Cray-2 and Cray-YMP
++   systems. This function is required for `alloca.c' support on those systems.
++   */
++/* #undef CRAY_STACKSEG_END */
++
++/* Define to 1 if using `alloca.c'. */
++/* #undef C_ALLOCA */
++
++/* Define to path of random device */
++#define DEV_RANDOM "/dev/urandom"
++
++/* Define if struct dirent has an inode member */
++#define DIRENT_INODE d_fileno
++
++/* Define if struct dirent has a d_type member */
++#define DIRENT_TYPE d_type
++
++/* Define if DSO support uses dlfcn.h */
++#define DSO_USE_DLFCN 1
++
++/* Define if DSO support uses dyld.h */
++/* #undef DSO_USE_DYLD */
++
++/* Define if DSO support uses shl_load */
++/* #undef DSO_USE_SHL */
++
++/* Define to list of paths to EGD sockets */
++/* #undef EGD_DEFAULT_SOCKET */
++
++/* Define if fcntl locks affect threads within the process */
++/* #undef FCNTL_IS_GLOBAL */
++
++/* Define if fcntl returns EACCES when F_SETLK is already held */
++/* #undef FCNTL_TRYACQUIRE_EACCES */
++
++/* Define if flock locks affect threads within the process */
++/* #undef FLOCK_IS_GLOBAL */
++
++/* Define if gethostbyaddr is thread safe */
++/* #undef GETHOSTBYADDR_IS_THREAD_SAFE */
++
++/* Define if gethostbyname is thread safe */
++/* #undef GETHOSTBYNAME_IS_THREAD_SAFE */
++
++/* Define if gethostbyname_r has the glibc style */
++#define GETHOSTBYNAME_R_GLIBC2 1
++
++/* Define if gethostbyname_r has the hostent_data for the third argument */
++/* #undef GETHOSTBYNAME_R_HOSTENT_DATA */
++
++/* Define if getservbyname is thread safe */
++/* #undef GETSERVBYNAME_IS_THREAD_SAFE */
++
++/* Define if getservbyname_r has the glibc style */
++#define GETSERVBYNAME_R_GLIBC2 1
++
++/* Define if getservbyname_r has the OSF/1 style */
++/* #undef GETSERVBYNAME_R_OSF1 */
++
++/* Define if getservbyname_r has the Solaris style */
++/* #undef GETSERVBYNAME_R_SOLARIS */
++
++/* Define if accept4 function is supported */
++/* #undef HAVE_ACCEPT4 */
++
++/* Define to 1 if you have `alloca', as a function or macro. */
++#define HAVE_ALLOCA 1
++
++/* Define to 1 if you have <alloca.h> and it should be used (not on Ultrix).
++   */
++#define HAVE_ALLOCA_H 1
++
++/* Define to 1 if you have the <arpa/inet.h> header file. */
++#define HAVE_ARPA_INET_H 1
++
++/* Define if compiler provides atomic builtins */
++#define HAVE_ATOMIC_BUILTINS 1
++
++/* Define if BONE_VERSION is defined in sys/socket.h */
++/* #undef HAVE_BONE_VERSION */
++
++/* Define to 1 if you have the <ByteOrder.h> header file. */
++/* #undef HAVE_BYTEORDER_H */
++
++/* Define to 1 if you have the `calloc' function. */
++#define HAVE_CALLOC 1
++
++/* Define to 1 if you have the <conio.h> header file. */
++/* #undef HAVE_CONIO_H */
++
++/* Define to 1 if you have the `create_area' function. */
++/* #undef HAVE_CREATE_AREA */
++
++/* Define to 1 if you have the `create_sem' function. */
++/* #undef HAVE_CREATE_SEM */
++
++/* Define to 1 if you have the <crypt.h> header file. */
++#define HAVE_CRYPT_H 1
++
++/* Define to 1 if you have the <ctype.h> header file. */
++#define HAVE_CTYPE_H 1
++
++/* Define to 1 if you have the declaration of `sys_siglist', and to 0 if you
++   don't. */
++#define HAVE_DECL_SYS_SIGLIST 1
++
++/* Define to 1 if you have the <dirent.h> header file. */
++#define HAVE_DIRENT_H 1
++
++/* Define to 1 if you have the <dir.h> header file. */
++/* #undef HAVE_DIR_H */
++
++/* Define to 1 if you have the <dlfcn.h> header file. */
++#define HAVE_DLFCN_H 1
++
++/* Define to 1 if you have the <dl.h> header file. */
++/* #undef HAVE_DL_H */
++
++/* Define if dup3 function is supported */
++/* #undef HAVE_DUP3 */
++
++/* Define if EGD is supported */
++/* #undef HAVE_EGD */
++
++/* Define if the epoll interface is supported */
++#define HAVE_EPOLL 1
++
++/* Define if epoll_create1 function is supported */
++/* #undef HAVE_EPOLL_CREATE1 */
++
++/* Define to 1 if you have the <errno.h> header file. */
++#define HAVE_ERRNO_H 1
++
++/* Define to 1 if you have the <fcntl.h> header file. */
++#define HAVE_FCNTL_H 1
++
++/* Define to 1 if you have the `fdatasync' function. */
++#define HAVE_FDATASYNC 1
++
++/* Define to 1 if you have the `flock' function. */
++#define HAVE_FLOCK 1
++
++/* Define to 1 if you have the `fork' function. */
++#define HAVE_FORK 1
++
++/* Define if F_SETLK is defined in fcntl.h */
++#define HAVE_F_SETLK 1
++
++/* Define if getaddrinfo accepts the AI_ADDRCONFIG flag */
++#define HAVE_GAI_ADDRCONFIG 1
++
++/* Define to 1 if you have the `gai_strerror' function. */
++#define HAVE_GAI_STRERROR 1
++
++/* Define if getaddrinfo exists and works well enough for APR */
++#define HAVE_GETADDRINFO 1
++
++/* Define to 1 if you have the `getenv' function. */
++#define HAVE_GETENV 1
++
++/* Define to 1 if you have the `getgrgid_r' function. */
++#define HAVE_GETGRGID_R 1
++
++/* Define to 1 if you have the `getgrnam_r' function. */
++#define HAVE_GETGRNAM_R 1
++
++/* Define to 1 if you have the `gethostbyaddr_r' function. */
++#define HAVE_GETHOSTBYADDR_R 1
++
++/* Define to 1 if you have the `gethostbyname_r' function. */
++#define HAVE_GETHOSTBYNAME_R 1
++
++/* Define to 1 if you have the `getifaddrs' function. */
++#define HAVE_GETIFADDRS 1
++
++/* Define if getnameinfo exists */
++#define HAVE_GETNAMEINFO 1
++
++/* Define to 1 if you have the `getpass' function. */
++#define HAVE_GETPASS 1
++
++/* Define to 1 if you have the `getpassphrase' function. */
++/* #undef HAVE_GETPASSPHRASE */
++
++/* Define to 1 if you have the `getpwnam_r' function. */
++#define HAVE_GETPWNAM_R 1
++
++/* Define to 1 if you have the `getpwuid_r' function. */
++#define HAVE_GETPWUID_R 1
++
++/* Define to 1 if you have the `getrlimit' function. */
++#define HAVE_GETRLIMIT 1
++
++/* Define to 1 if you have the `getservbyname_r' function. */
++#define HAVE_GETSERVBYNAME_R 1
++
++/* Define to 1 if you have the `gmtime_r' function. */
++#define HAVE_GMTIME_R 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define if hstrerror is present */
++/* #undef HAVE_HSTRERROR */
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the <io.h> header file. */
++/* #undef HAVE_IO_H */
++
++/* Define to 1 if you have the `isinf' function. */
++#define HAVE_ISINF 1
++
++/* Define to 1 if you have the `isnan' function. */
++#define HAVE_ISNAN 1
++
++/* Define to 1 if you have the <kernel/OS.h> header file. */
++/* #undef HAVE_KERNEL_OS_H */
++
++/* Define to 1 if you have the `kqueue' function. */
++/* #undef HAVE_KQUEUE */
++
++/* Define to 1 if you have the <langinfo.h> header file. */
++#define HAVE_LANGINFO_H 1
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBADVAPI32 */
++
++/* Define to 1 if you have the `bsd' library (-lbsd). */
++/* #undef HAVE_LIBBSD */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBKERNEL32 */
++
++/* Define to 1 if you have the `msvcrt' library (-lmsvcrt). */
++/* #undef HAVE_LIBMSVCRT */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBRPCRT4 */
++
++/* Define to 1 if you have the `sendfile' library (-lsendfile). */
++/* #undef HAVE_LIBSENDFILE */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBSHELL32 */
++
++/* Define to 1 if you have the `truerand' library (-ltruerand). */
++/* #undef HAVE_LIBTRUERAND */
++
++/* Enable if this library is available */
++/* #undef HAVE_LIBWS2_32 */
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the `localtime_r' function. */
++#define HAVE_LOCALTIME_R 1
++
++/* Define if LOCK_EX is defined in sys/file.h */
++#define HAVE_LOCK_EX 1
++
++/* Define to 1 if you have the <mach-o/dyld.h> header file. */
++/* #undef HAVE_MACH_O_DYLD_H */
++
++/* Define to 1 if you have the <malloc.h> header file. */
++#define HAVE_MALLOC_H 1
++
++/* Define if MAP_ANON is defined in sys/mman.h */
++#define HAVE_MAP_ANON 1
++
++/* Define to 1 if you have the `memchr' function. */
++#define HAVE_MEMCHR 1
++
++/* Define to 1 if you have the `memmove' function. */
++#define HAVE_MEMMOVE 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define to 1 if you have the `mkstemp' function. */
++#define HAVE_MKSTEMP 1
++
++/* Define to 1 if you have the `mkstemp64' function. */
++#define HAVE_MKSTEMP64 1
++
++/* Define to 1 if you have the `mmap' function. */
++#define HAVE_MMAP 1
++
++/* Define to 1 if you have the `mmap64' function. */
++#define HAVE_MMAP64 1
++
++/* Define to 1 if you have the `munmap' function. */
++#define HAVE_MUNMAP 1
++
++/* Define to 1 if you have the <netdb.h> header file. */
++#define HAVE_NETDB_H 1
++
++/* Define to 1 if you have the <netinet/in.h> header file. */
++#define HAVE_NETINET_IN_H 1
++
++/* Define to 1 if you have the <netinet/sctp.h> header file. */
++/* #undef HAVE_NETINET_SCTP_H */
++
++/* Define to 1 if you have the <netinet/sctp_uio.h> header file. */
++/* #undef HAVE_NETINET_SCTP_UIO_H */
++
++/* Defined if netinet/tcp.h is present */
++#define HAVE_NETINET_TCP_H 1
++
++/* Define to 1 if you have the <net/errno.h> header file. */
++/* #undef HAVE_NET_ERRNO_H */
++
++/* Define to 1 if you have the `nl_langinfo' function. */
++#define HAVE_NL_LANGINFO 1
++
++/* Define to 1 if you have the <os2.h> header file. */
++/* #undef HAVE_OS2_H */
++
++/* Define to 1 if you have the <osreldate.h> header file. */
++/* #undef HAVE_OSRELDATE_H */
++
++/* Define to 1 if you have the <OS.h> header file. */
++/* #undef HAVE_OS_H */
++
++/* Define to 1 if you have the `poll' function. */
++#define HAVE_POLL 1
++
++/* Define if POLLIN is defined */
++#define HAVE_POLLIN 1
++
++/* Define to 1 if you have the <poll.h> header file. */
++#define HAVE_POLL_H 1
++
++/* Define to 1 if you have the `port_create' function. */
++/* #undef HAVE_PORT_CREATE */
++
++/* Define to 1 if you have the <process.h> header file. */
++/* #undef HAVE_PROCESS_H */
++
++/* Define to 1 if you have the `pthread_attr_setguardsize' function. */
++#define HAVE_PTHREAD_ATTR_SETGUARDSIZE 1
++
++/* Define to 1 if you have the <pthread.h> header file. */
++#define HAVE_PTHREAD_H 1
++
++/* Define to 1 if you have the `pthread_key_delete' function. */
++#define HAVE_PTHREAD_KEY_DELETE 1
++
++/* Define to 1 if you have the `pthread_mutexattr_setpshared' function. */
++#define HAVE_PTHREAD_MUTEXATTR_SETPSHARED 1
++
++/* Define if recursive pthread mutexes are available */
++#define HAVE_PTHREAD_MUTEX_RECURSIVE 1
++
++/* Define if cross-process robust mutexes are available */
++#define HAVE_PTHREAD_MUTEX_ROBUST 1
++
++/* Define if PTHREAD_PROCESS_SHARED is defined in pthread.h */
++#define HAVE_PTHREAD_PROCESS_SHARED 1
++
++/* Define if pthread rwlocks are available */
++#define HAVE_PTHREAD_RWLOCKS 1
++
++/* Define to 1 if you have the `pthread_rwlock_init' function. */
++#define HAVE_PTHREAD_RWLOCK_INIT 1
++
++/* Define to 1 if you have the `pthread_yield' function. */
++#define HAVE_PTHREAD_YIELD 1
++
++/* Define to 1 if you have the `putenv' function. */
++#define HAVE_PUTENV 1
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `readdir64_r' function. */
++#define HAVE_READDIR64_R 1
++
++/* Define to 1 if you have the <sched.h> header file. */
++/* #undef HAVE_SCHED_H */
++
++/* Define to 1 if you have the `sched_yield' function. */
++/* #undef HAVE_SCHED_YIELD */
++
++/* Define to 1 if you have the <semaphore.h> header file. */
++#define HAVE_SEMAPHORE_H 1
++
++/* Define to 1 if you have the `semctl' function. */
++#define HAVE_SEMCTL 1
++
++/* Define to 1 if you have the `semget' function. */
++#define HAVE_SEMGET 1
++
++/* Define to 1 if you have the `sem_close' function. */
++#define HAVE_SEM_CLOSE 1
++
++/* Define to 1 if you have the `sem_post' function. */
++#define HAVE_SEM_POST 1
++
++/* Define if SEM_UNDO is defined in sys/sem.h */
++#define HAVE_SEM_UNDO 1
++
++/* Define to 1 if you have the `sem_unlink' function. */
++#define HAVE_SEM_UNLINK 1
++
++/* Define to 1 if you have the `sem_wait' function. */
++#define HAVE_SEM_WAIT 1
++
++/* Define to 1 if you have the `sendfile' function. */
++#define HAVE_SENDFILE 1
++
++/* Define to 1 if you have the `sendfile64' function. */
++#define HAVE_SENDFILE64 1
++
++/* Define to 1 if you have the `sendfilev' function. */
++/* #undef HAVE_SENDFILEV */
++
++/* Define to 1 if you have the `sendfilev64' function. */
++/* #undef HAVE_SENDFILEV64 */
++
++/* Define to 1 if you have the `send_file' function. */
++/* #undef HAVE_SEND_FILE */
++
++/* Define to 1 if you have the `setenv' function. */
++#define HAVE_SETENV 1
++
++/* Define to 1 if you have the `setrlimit' function. */
++#define HAVE_SETRLIMIT 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define to 1 if you have the `set_h_errno' function. */
++/* #undef HAVE_SET_H_ERRNO */
++
++/* Define to 1 if you have the `shmat' function. */
++#define HAVE_SHMAT 1
++
++/* Define to 1 if you have the `shmctl' function. */
++#define HAVE_SHMCTL 1
++
++/* Define to 1 if you have the `shmdt' function. */
++#define HAVE_SHMDT 1
++
++/* Define to 1 if you have the `shmget' function. */
++#define HAVE_SHMGET 1
++
++/* Define to 1 if you have the `shm_open' function. */
++#define HAVE_SHM_OPEN 1
++
++/* Define to 1 if you have the `shm_unlink' function. */
++#define HAVE_SHM_UNLINK 1
++
++/* Define to 1 if you have the `sigaction' function. */
++#define HAVE_SIGACTION 1
++
++/* Define to 1 if you have the <signal.h> header file. */
++#define HAVE_SIGNAL_H 1
++
++/* Define to 1 if you have the `sigsuspend' function. */
++#define HAVE_SIGSUSPEND 1
++
++/* Define to 1 if you have the `sigwait' function. */
++#define HAVE_SIGWAIT 1
++
++/* Whether you have socklen_t */
++#define HAVE_SOCKLEN_T 1
++
++/* Define if the SOCK_CLOEXEC flag is supported */
++/* #undef HAVE_SOCK_CLOEXEC */
++
++/* Define if SO_ACCEPTFILTER is defined in sys/socket.h */
++/* #undef HAVE_SO_ACCEPTFILTER */
++
++/* Define to 1 if you have the <stdarg.h> header file. */
++#define HAVE_STDARG_H 1
++
++/* Define to 1 if you have the <stddef.h> header file. */
++#define HAVE_STDDEF_H 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdio.h> header file. */
++#define HAVE_STDIO_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the `strcasecmp' function. */
++#define HAVE_STRCASECMP 1
++
++/* Define to 1 if you have the `strdup' function. */
++#define HAVE_STRDUP 1
++
++/* Define to 1 if you have the `strerror_r' function. */
++#define HAVE_STRERROR_R 1
++
++/* Define to 1 if you have the `stricmp' function. */
++/* #undef HAVE_STRICMP */
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `strncasecmp' function. */
++#define HAVE_STRNCASECMP 1
++
++/* Define to 1 if you have the `strnicmp' function. */
++/* #undef HAVE_STRNICMP */
++
++/* Define to 1 if you have the `strstr' function. */
++#define HAVE_STRSTR 1
++
++/* Define if struct impreq was found */
++#define HAVE_STRUCT_IPMREQ 1
++
++/* Define to 1 if `st_atimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_ATIMENSEC */
++
++/* Define to 1 if `st_atime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_ATIME_N */
++
++/* Define to 1 if `st_atim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_ATIM_TV_NSEC 1
++
++/* Define to 1 if `st_blocks' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_BLOCKS 1
++
++/* Define to 1 if `st_ctimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_CTIMENSEC */
++
++/* Define to 1 if `st_ctime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_CTIME_N */
++
++/* Define to 1 if `st_ctim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_CTIM_TV_NSEC 1
++
++/* Define to 1 if `st_mtimensec' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_MTIMENSEC */
++
++/* Define to 1 if `st_mtime_n' is member of `struct stat'. */
++/* #undef HAVE_STRUCT_STAT_ST_MTIME_N */
++
++/* Define to 1 if `st_mtim.tv_nsec' is member of `struct stat'. */
++#define HAVE_STRUCT_STAT_ST_MTIM_TV_NSEC 1
++
++/* Define to 1 if `tm_gmtoff' is member of `struct tm'. */
++#define HAVE_STRUCT_TM_TM_GMTOFF 1
++
++/* Define to 1 if `__tm_gmtoff' is member of `struct tm'. */
++/* #undef HAVE_STRUCT_TM___TM_GMTOFF */
++
++/* Define to 1 if you have the <sysapi.h> header file. */
++/* #undef HAVE_SYSAPI_H */
++
++/* Define to 1 if you have the <sysgtime.h> header file. */
++/* #undef HAVE_SYSGTIME_H */
++
++/* Define to 1 if you have the <sys/file.h> header file. */
++#define HAVE_SYS_FILE_H 1
++
++/* Define to 1 if you have the <sys/ioctl.h> header file. */
++#define HAVE_SYS_IOCTL_H 1
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/mman.h> header file. */
++#define HAVE_SYS_MMAN_H 1
++
++/* Define to 1 if you have the <sys/mutex.h> header file. */
++/* #undef HAVE_SYS_MUTEX_H */
++
++/* Define to 1 if you have the <sys/param.h> header file. */
++#define HAVE_SYS_PARAM_H 1
++
++/* Define to 1 if you have the <sys/poll.h> header file. */
++#define HAVE_SYS_POLL_H 1
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/select.h> header file. */
++#define HAVE_SYS_SELECT_H 1
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/sendfile.h> header file. */
++#define HAVE_SYS_SENDFILE_H 1
++
++/* Define to 1 if you have the <sys/shm.h> header file. */
++#define HAVE_SYS_SHM_H 1
++
++/* Define to 1 if you have the <sys/signal.h> header file. */
++#define HAVE_SYS_SIGNAL_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/sockio.h> header file. */
++/* #undef HAVE_SYS_SOCKIO_H */
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/sysctl.h> header file. */
++#define HAVE_SYS_SYSCTL_H 1
++
++/* Define to 1 if you have the <sys/syslimits.h> header file. */
++/* #undef HAVE_SYS_SYSLIMITS_H */
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have the <sys/uio.h> header file. */
++#define HAVE_SYS_UIO_H 1
++
++/* Define to 1 if you have the <sys/un.h> header file. */
++#define HAVE_SYS_UN_H 1
++
++/* Define to 1 if you have the <sys/uuid.h> header file. */
++/* #undef HAVE_SYS_UUID_H */
++
++/* Define to 1 if you have the <sys/wait.h> header file. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define if TCP_CORK is defined in netinet/tcp.h */
++#define HAVE_TCP_CORK 1
++
++/* Define if TCP_NODELAY and TCP_CORK can be enabled at the same time */
++#define HAVE_TCP_NODELAY_WITH_CORK 1
++
++/* Define if TCP_NOPUSH is defined in netinet/tcp.h */
++/* #undef HAVE_TCP_NOPUSH */
++
++/* Define to 1 if you have the <termios.h> header file. */
++#define HAVE_TERMIOS_H 1
++
++/* Define to 1 if you have the <time.h> header file. */
++#define HAVE_TIME_H 1
++
++/* Define to 1 if you have the <tpfeq.h> header file. */
++/* #undef HAVE_TPFEQ_H */
++
++/* Define to 1 if you have the <tpfio.h> header file. */
++/* #undef HAVE_TPFIO_H */
++
++/* Define if truerand is supported */
++/* #undef HAVE_TRUERAND */
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Define to 1 if you have the <unix.h> header file. */
++/* #undef HAVE_UNIX_H */
++
++/* Define to 1 if you have the `unsetenv' function. */
++#define HAVE_UNSETENV 1
++
++/* Define to 1 if you have the `utime' function. */
++#define HAVE_UTIME 1
++
++/* Define to 1 if you have the `utimes' function. */
++#define HAVE_UTIMES 1
++
++/* Define to 1 if you have the `uuid_create' function. */
++/* #undef HAVE_UUID_CREATE */
++
++/* Define to 1 if you have the `uuid_generate' function. */
++#define HAVE_UUID_GENERATE 1
++
++/* Define to 1 if you have the <uuid.h> header file. */
++/* #undef HAVE_UUID_H */
++
++/* Define to 1 if you have the <uuid/uuid.h> header file. */
++/* #undef HAVE_UUID_UUID_H */
++
++/* Define if C compiler supports VLA */
++#define HAVE_VLA 1
++
++/* Define to 1 if you have the `waitpid' function. */
++#define HAVE_WAITPID 1
++
++/* Define to 1 if you have the <windows.h> header file. */
++/* #undef HAVE_WINDOWS_H */
++
++/* Define to 1 if you have the <winsock2.h> header file. */
++/* #undef HAVE_WINSOCK2_H */
++
++/* Define to 1 if you have the `writev' function. */
++#define HAVE_WRITEV 1
++
++/* Define for z/OS pthread API nuances */
++/* #undef HAVE_ZOS_PTHREADS */
++
++/* Define if EAI_ error codes from getaddrinfo are negative */
++#define NEGATIVE_EAI 1
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Define if POSIX semaphores affect threads within the process */
++/* #undef POSIXSEM_IS_GLOBAL */
++
++/* Define on PowerPC 405 where errata 77 applies */
++/* #undef PPC405_ERRATA */
++
++/* Define if pthread_attr_getdetachstate() has one arg */
++/* #undef PTHREAD_ATTR_GETDETACHSTATE_TAKES_ONE_ARG */
++
++/* Define if pthread_getspecific() has two args */
++/* #undef PTHREAD_GETSPECIFIC_TAKES_TWO_ARGS */
++
++/* Define if readdir is thread safe */
++/* #undef READDIR_IS_THREAD_SAFE */
++
++/* Define to 1 if the `setpgrp' function takes no argument. */
++#define SETPGRP_VOID 1
++
++/* */
++/* #undef SIGWAIT_TAKES_ONE_ARG */
++
++/* The size of `char', as computed by sizeof. */
++#define SIZEOF_CHAR 1
++
++/* The size of `int', as computed by sizeof. */
++#define SIZEOF_INT 4
++
++/* The size of `long', as computed by sizeof. */
++#define SIZEOF_LONG 4
++
++/* The size of `long long', as computed by sizeof. */
++#define SIZEOF_LONG_LONG 8
++
++/* The size of off_t */
++#define SIZEOF_OFF_T 4
++
++/* The size of pid_t */
++#define SIZEOF_PID_T 4
++
++/* The size of `short', as computed by sizeof. */
++#define SIZEOF_SHORT 2
++
++/* The size of size_t */
++#define SIZEOF_SIZE_T 4
++
++/* The size of ssize_t */
++#define SIZEOF_SSIZE_T 4
++
++/* The size of struct iovec */
++#define SIZEOF_STRUCT_IOVEC 8
++
++/* The size of `void*', as computed by sizeof. */
++#define SIZEOF_VOIDP 4
++
++/* If using the C implementation of alloca, define if you know the
++   direction of stack growth for your system; otherwise it will be
++   automatically deduced at runtime.
++	STACK_DIRECTION > 0 => grows toward higher addresses
++	STACK_DIRECTION < 0 => grows toward lower addresses
++	STACK_DIRECTION = 0 => direction of growth unknown */
++/* #undef STACK_DIRECTION */
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Define if strerror returns int */
++/* #undef STRERROR_R_RC_INT */
++
++/* Define if SysV semaphores affect threads within the process */
++/* #undef SYSVSEM_IS_GLOBAL */
++
++/* Define if use of generic atomics is requested */
++#define USE_ATOMICS_GENERIC 1
++
++/* Define if BeOS Semaphores will be used */
++/* #undef USE_BEOSSEM */
++
++/* Define if SVR4-style fcntl() will be used */
++/* #undef USE_FCNTL_SERIALIZE */
++
++/* Define if 4.2BSD-style flock() will be used */
++/* #undef USE_FLOCK_SERIALIZE */
++
++/* Define if BeOS areas will be used */
++/* #undef USE_SHMEM_BEOS */
++
++/* Define if BeOS areas will be used */
++/* #undef USE_SHMEM_BEOS_ANON */
++
++/* Define if 4.4BSD-style mmap() via MAP_ANON will be used */
++#define USE_SHMEM_MMAP_ANON 1
++
++/* Define if mmap() via POSIX.1 shm_open() on temporary file will be used */
++/* #undef USE_SHMEM_MMAP_SHM */
++
++/* Define if Classical mmap() on temporary file will be used */
++/* #undef USE_SHMEM_MMAP_TMP */
++
++/* Define if SVR4-style mmap() on /dev/zero will be used */
++/* #undef USE_SHMEM_MMAP_ZERO */
++
++/* Define if OS/2 DosAllocSharedMem() will be used */
++/* #undef USE_SHMEM_OS2 */
++
++/* Define if OS/2 DosAllocSharedMem() will be used */
++/* #undef USE_SHMEM_OS2_ANON */
++
++/* Define if SysV IPC shmget() will be used */
++#define USE_SHMEM_SHMGET 1
++
++/* Define if SysV IPC shmget() will be used */
++/* #undef USE_SHMEM_SHMGET_ANON */
++
++/* Define if Windows shared memory will be used */
++/* #undef USE_SHMEM_WIN32 */
++
++/* Define if Windows CreateFileMapping() will be used */
++/* #undef USE_SHMEM_WIN32_ANON */
++
++/* Define if SysV IPC semget() will be used */
++#define USE_SYSVSEM_SERIALIZE 1
++
++/* Define if apr_wait_for_io_or_timeout() uses poll(2) */
++#define WAITIO_USES_POLL 1
++
++/* Define to 1 if your processor stores words with the most significant byte
++   first (like Motorola and SPARC, unlike Intel and VAX). */
++/* #undef WORDS_BIGENDIAN */
++
++/* Define to 1 if on AIX 3.
++   System headers sometimes define this.
++   We just want to avoid a redefinition error message.  */
++#ifndef _ALL_SOURCE
++/* # undef _ALL_SOURCE */
++#endif
++
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Enable extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to `int' if <sys/types.h> doesn't define. */
++/* #undef gid_t */
++
++/* Define to `__inline__' or `__inline' if that's what the C compiler
++   calls it, or to nothing if 'inline' is not supported under any name.  */
++#ifndef __cplusplus
++/* #undef inline */
++#endif
++
++/* Define to `long int' if <sys/types.h> does not define. */
++/* #undef off_t */
++
++/* Define to `int' if <sys/types.h> does not define. */
++/* #undef pid_t */
++
++/* Define to `unsigned int' if <sys/types.h> does not define. */
++/* #undef size_t */
++
++/* Define to `int' if <sys/types.h> does not define. */
++/* #undef ssize_t */
++
++/* Define to `int' if <sys/types.h> doesn't define. */
++/* #undef uid_t */
++
++
++/* switch this on if we have a BeOS version below BONE */
++#if BEOS && !HAVE_BONE_VERSION
++#define BEOS_R5 1
++#else
++#define BEOS_BONE 1
++#endif
++
++/*
++ * Include common private declarations.
++ */
++#include "../apr_private_common.h"
++#endif /* APR_PRIVATE_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apr_ldap.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apr_ldap.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apr_ldap.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apr_ldap.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,197 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * apr_ldap.h is generated from apr_ldap.h.in by configure -- do not edit apr_ldap.h
++ */
++/**
++ * @file apr_ldap.h
++ * @brief  APR-UTIL LDAP 
++ */
++#ifndef APU_LDAP_H
++#define APU_LDAP_H
++
++/**
++ * @defgroup APR_Util_LDAP LDAP
++ * @ingroup APR_Util
++ * @{
++ */
++
++/* this will be defined if LDAP support was compiled into apr-util */
++#define APR_HAS_LDAP		  0
++
++/* identify the LDAP toolkit used */
++#define APR_HAS_NETSCAPE_LDAPSDK  0
++#define APR_HAS_SOLARIS_LDAPSDK   0
++#define APR_HAS_NOVELL_LDAPSDK    0
++#define APR_HAS_MOZILLA_LDAPSDK   0
++#define APR_HAS_OPENLDAP_LDAPSDK  0
++#define APR_HAS_MICROSOFT_LDAPSDK 0
++#define APR_HAS_TIVOLI_LDAPSDK    0
++#define APR_HAS_ZOS_LDAPSDK       0
++#define APR_HAS_OTHER_LDAPSDK     0
++
++
++/*
++ * Handle the case when LDAP is enabled
++ */
++#if APR_HAS_LDAP
++
++/*
++ * The following #defines are DEPRECATED and should not be used for
++ * anything. They remain to maintain binary compatibility.
++ * The original code defined the OPENLDAP SDK as present regardless
++ * of what really was there, which was way bogus. In addition, the
++ * apr_ldap_url_parse*() functions have been rewritten specifically for
++ * APR, so the APR_HAS_LDAP_URL_PARSE macro is forced to zero.
++ */
++#if APR_HAS_TIVOLI_LDAPSDK
++#define APR_HAS_LDAP_SSL 0
++#else
++#define APR_HAS_LDAP_SSL 1
++#endif
++#define APR_HAS_LDAP_URL_PARSE      0
++
++#if APR_HAS_OPENLDAP_LDAPSDK && !defined(LDAP_DEPRECATED) 
++/* Ensure that the "deprecated" interfaces are still exposed
++ * with OpenLDAP >= 2.3; these were exposed by default in earlier
++ * releases. */
++#define LDAP_DEPRECATED 1
++#endif
++
++/*
++ * Include the standard LDAP header files.
++ */
++
++
++
++
++
++
++/*
++ * Detected standard functions
++ */
++#define APR_HAS_LDAPSSL_CLIENT_INIT 0
++#define APR_HAS_LDAPSSL_CLIENT_DEINIT 0
++#define APR_HAS_LDAPSSL_ADD_TRUSTED_CERT 0
++#define APR_HAS_LDAP_START_TLS_S 0
++#define APR_HAS_LDAP_SSLINIT 0
++#define APR_HAS_LDAPSSL_INIT 0
++#define APR_HAS_LDAPSSL_INSTALL_ROUTINES 0
++
++/*
++ * Make sure the secure LDAP port is defined
++ */
++#ifndef LDAPS_PORT
++#define LDAPS_PORT 636  /* ldaps:/// default LDAP over TLS port */
++#endif
++
++/*
++ * For ldap function calls that input a size limit on the number of returned elements
++ * Some SDKs do not have the define for LDAP_DEFAULT_LIMIT (-1) or LDAP_NO_LIMIT (0)
++ * LDAP_DEFAULT_LIMIT is preferred as it allows inheritance from whatever the SDK
++ * or process is configured for.
++ */
++#ifdef LDAP_DEFAULT_LIMIT
++#define APR_LDAP_SIZELIMIT LDAP_DEFAULT_LIMIT
++#else
++#ifdef LDAP_NO_LIMIT
++#define APR_LDAP_SIZELIMIT LDAP_NO_LIMIT
++#endif
++#endif
++
++#ifndef APR_LDAP_SIZELIMIT
++#define APR_LDAP_SIZELIMIT 0 /* equivalent to LDAP_NO_LIMIT, and what goes on the wire */
++#endif
++
++/*
++ * z/OS is missing some defines
++ */
++#ifndef LDAP_VERSION_MAX
++#define LDAP_VERSION_MAX  LDAP_VERSION
++#endif
++#if APR_HAS_ZOS_LDAPSDK
++#define LDAP_VENDOR_NAME "IBM z/OS"
++#endif
++
++/* Note: Macros defining const casting has been removed in APR v1.0,
++ * pending real support for LDAP v2.0 toolkits.
++ *
++ * In the mean time, please use an LDAP v3.0 toolkit.
++ */
++#if LDAP_VERSION_MAX <= 2
++#error Support for LDAP v2.0 toolkits has been removed from apr-util. Please use an LDAP v3.0 toolkit.
++#endif 
++
++#ifdef __cplusplus
++extern "C" {
++#endif /* __cplusplus */
++
++/**
++ * This structure allows the C LDAP API error codes to be returned
++ * along with plain text error messages that explain to us mere mortals
++ * what really happened.
++ */
++typedef struct apr_ldap_err_t {
++    const char *reason;
++    const char *msg;
++    int rc;
++} apr_ldap_err_t;
++
++#ifdef __cplusplus
++}
++#endif
++
++/* The MS SDK returns LDAP_UNAVAILABLE when the backend has closed the connection
++ * between LDAP calls. Protect with APR_HAS_MICROSOFT_LDAPSDK in case someone 
++ * manually chooses another SDK on Windows 
++ */
++#if APR_HAS_MICROSOFT_LDAPSDK
++#define APR_LDAP_IS_SERVER_DOWN(s)    ((s) == LDAP_SERVER_DOWN \
++                                    || (s) == LDAP_UNAVAILABLE)
++#else
++#define APR_LDAP_IS_SERVER_DOWN(s)    ((s) == LDAP_SERVER_DOWN)
++#endif
++
++/* These symbols are not actually exported in a DSO build, but mapped into
++ * a private exported function array for apr_ldap_stub to bind dynamically.
++ * Rename them appropriately to protect the global namespace.
++ */
++#ifdef APU_DSO_LDAP_BUILD
++
++#define apr_ldap_info apr__ldap_info
++#define apr_ldap_init apr__ldap_init
++#define apr_ldap_ssl_init apr__ldap_ssl_init
++#define apr_ldap_ssl_deinit apr__ldap_ssl_deinit
++#define apr_ldap_get_option apr__ldap_get_option
++#define apr_ldap_set_option apr__ldap_set_option
++#define apr_ldap_rebind_init apr__ldap_rebind_init
++#define apr_ldap_rebind_add apr__ldap_rebind_add
++#define apr_ldap_rebind_remove apr__ldap_rebind_remove
++
++#define APU_DECLARE_LDAP(type) type
++#else
++#define APU_DECLARE_LDAP(type) APU_DECLARE(type)
++#endif
++
++#include "apr_ldap_url.h"
++#include "apr_ldap_init.h"
++#include "apr_ldap_option.h"
++#include "apr_ldap_rebind.h"
++
++/** @} */
++#endif /* APR_HAS_LDAP */
++#endif /* APU_LDAP_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apu.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apu.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apu.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apu.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,110 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * apu.h is generated from apu.h.in by configure -- do not edit apu.h
++ */
++/* @file apu.h
++ * @brief APR-Utility main file
++ */
++/**
++ * @defgroup APR_Util APR Utility Functions
++ * @{
++ */
++
++
++#ifndef APU_H
++#define APU_H
++
++/**
++ * APU_DECLARE_EXPORT is defined when building the APR-UTIL dynamic library,
++ * so that all public symbols are exported.
++ *
++ * APU_DECLARE_STATIC is defined when including the APR-UTIL public headers,
++ * to provide static linkage when the dynamic library may be unavailable.
++ *
++ * APU_DECLARE_STATIC and APU_DECLARE_EXPORT are left undefined when
++ * including the APR-UTIL public headers, to import and link the symbols from 
++ * the dynamic APR-UTIL library and assure appropriate indirection and calling
++ * conventions at compile time.
++ */
++
++/**
++ * The public APR-UTIL functions are declared with APU_DECLARE(), so they may
++ * use the most appropriate calling convention.  Public APR functions with 
++ * variable arguments must use APU_DECLARE_NONSTD().
++ *
++ * @fn APU_DECLARE(rettype) apr_func(args);
++ */
++#define APU_DECLARE(type)            type
++/**
++ * The public APR-UTIL functions using variable arguments are declared with 
++ * APU_DECLARE_NONSTD(), as they must use the C language calling convention.
++ *
++ * @fn APU_DECLARE_NONSTD(rettype) apr_func(args, ...);
++ */
++#define APU_DECLARE_NONSTD(type)     type
++/**
++ * The public APR-UTIL variables are declared with APU_DECLARE_DATA.
++ * This assures the appropriate indirection is invoked at compile time.
++ *
++ * @fn APU_DECLARE_DATA type apr_variable;
++ * @note APU_DECLARE_DATA extern type apr_variable; syntax is required for
++ * declarations within headers to properly import the variable.
++ */
++#define APU_DECLARE_DATA
++
++#if !defined(WIN32) || defined(APU_MODULE_DECLARE_STATIC)
++/**
++ * Declare a dso module's exported module structure as APU_MODULE_DECLARE_DATA.
++ *
++ * Unless APU_MODULE_DECLARE_STATIC is defined at compile time, symbols 
++ * declared with APU_MODULE_DECLARE_DATA are always exported.
++ * @code
++ * module APU_MODULE_DECLARE_DATA mod_tag
++ * @endcode
++ */
++#define APU_MODULE_DECLARE_DATA
++#else
++#define APU_MODULE_DECLARE_DATA           __declspec(dllexport)
++#endif
++
++/*
++ * we always have SDBM (it's in our codebase)
++ */
++#define APU_HAVE_SDBM   1
++#define APU_HAVE_GDBM   0
++#define APU_HAVE_NDBM   0
++#define APU_HAVE_DB     0
++
++#if APU_HAVE_DB
++#define APU_HAVE_DB_VERSION    0
++#endif
++
++#define APU_HAVE_PGSQL         1
++#define APU_HAVE_MYSQL         0
++#define APU_HAVE_SQLITE3       1
++#define APU_HAVE_SQLITE2       0
++#define APU_HAVE_ORACLE        0
++#define APU_HAVE_FREETDS       0
++#define APU_HAVE_ODBC          0
++
++#define APU_HAVE_APR_ICONV     0
++#define APU_HAVE_ICONV         1
++#define APR_HAS_XLATE          (APU_HAVE_APR_ICONV || APU_HAVE_ICONV)
++
++#endif /* APU_H */
++/** @} */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apu_want.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apu_want.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/apu_want.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/apu_want.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,51 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "apu.h"        /* configuration data */
++
++/**
++ * @file apu_want.h
++ * @brief APR Standard Headers Support
++ *
++ * <PRE>
++ * Features:
++ *
++ *   APU_WANT_DB:       <db.h>
++ *
++ * Typical usage:
++ *
++ *   #define APU_WANT_DB
++ *   #include "apu_want.h"
++ *
++ * The appropriate headers will be included.
++ *
++ * Note: it is safe to use this in a header (it won't interfere with other
++ *       headers' or source files' use of apu_want.h)
++ * </PRE>
++ */
++
++/* --------------------------------------------------------------------- */
++
++#ifdef APU_WANT_DB
++
++#if APU_HAVE_DB
++#include <db.h>
++#endif
++
++#undef APU_WANT_DB
++#endif
++
++/* --------------------------------------------------------------------- */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/private/apu_config.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/private/apu_config.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/private/apu_config.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/private/apu_config.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,149 @@
++/* include/private/apu_config.h.  Generated from apu_config.h.in by configure.  */
++/* include/private/apu_config.h.in.  Generated from configure.in by autoheader.  */
++
++/* Define if the system crypt() function is threadsafe */
++/* #undef APU_CRYPT_THREADSAFE */
++
++/* Define to 1 if modular components are built as DSOs */
++#define APU_DSO_BUILD 1
++
++/* Define to be absolute path to DSO directory */
++#define APU_DSO_LIBDIR "/usr/local/apr/lib/apr-util-1"
++
++/* Define if the inbuf parm to iconv() is const char ** */
++/* #undef APU_ICONV_INBUF_CONST */
++
++/* Define if crypt_r has uses CRYPTD */
++/* #undef CRYPT_R_CRYPTD */
++
++/* Define if crypt_r uses struct crypt_data */
++#define CRYPT_R_STRUCT_CRYPT_DATA 1
++
++/* Define if CODESET is defined in langinfo.h */
++#define HAVE_CODESET 1
++
++/* Define to 1 if you have the `crypt_r' function. */
++#define HAVE_CRYPT_R 1
++
++/* Define if expat.h is available */
++#define HAVE_EXPAT_H 1
++
++/* Define to 1 if you have the <freetds/sybdb.h> header file. */
++/* #undef HAVE_FREETDS_SYBDB_H */
++
++/* Define to 1 if you have the <iconv.h> header file. */
++#define HAVE_ICONV_H 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the <langinfo.h> header file. */
++#define HAVE_LANGINFO_H 1
++
++/* Define to 1 if you have the <lber.h> header file. */
++/* #undef HAVE_LBER_H */
++
++/* Defined if ldap.h is present */
++/* #undef HAVE_LDAP_H */
++
++/* Define to 1 if you have the <ldap_ssl.h> header file. */
++/* #undef HAVE_LDAP_SSL_H */
++
++/* Define to 1 if you have the <libpq-fe.h> header file. */
++#define HAVE_LIBPQ_FE_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define to 1 if you have the <mysql.h> header file. */
++/* #undef HAVE_MYSQL_H */
++
++/* Define to 1 if you have the <mysql/mysql.h> header file. */
++/* #undef HAVE_MYSQL_MYSQL_H */
++
++/* Define to 1 if you have the <mysql/my_global.h> header file. */
++/* #undef HAVE_MYSQL_MY_GLOBAL_H */
++
++/* Define to 1 if you have the <mysql/my_sys.h> header file. */
++/* #undef HAVE_MYSQL_MY_SYS_H */
++
++/* Define to 1 if you have the <my_global.h> header file. */
++/* #undef HAVE_MY_GLOBAL_H */
++
++/* Define to 1 if you have the <my_sys.h> header file. */
++/* #undef HAVE_MY_SYS_H */
++
++/* Define to 1 if you have the `nl_langinfo' function. */
++#define HAVE_NL_LANGINFO 1
++
++/* Define to 1 if you have the <oci.h> header file. */
++/* #undef HAVE_OCI_H */
++
++/* Define to 1 if you have the <odbc/sql.h> header file. */
++/* #undef HAVE_ODBC_SQL_H */
++
++/* Define to 1 if you have the <postgresql/libpq-fe.h> header file. */
++/* #undef HAVE_POSTGRESQL_LIBPQ_FE_H */
++
++/* Define to 1 if you have the <sqlite3.h> header file. */
++#define HAVE_SQLITE3_H 1
++
++/* Define to 1 if you have the <sqlite.h> header file. */
++/* #undef HAVE_SQLITE_H */
++
++/* Define to 1 if you have the <sql.h> header file. */
++/* #undef HAVE_SQL_H */
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the <sybdb.h> header file. */
++/* #undef HAVE_SYBDB_H */
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Define if xmlparse/xmlparse.h is available */
++/* #undef HAVE_XMLPARSE_XMLPARSE_H */
++
++/* Define if xmltok/xmlparse.h is available */
++/* #undef HAVE_XMLTOK_XMLPARSE_H */
++
++/* Define if xml/xmlparse.h is available */
++/* #undef HAVE_XML_XMLPARSE_H */
++
++/* Define if ldap_set_rebind_proc takes three arguments */
++/* #undef LDAP_SET_REBIND_PROC_THREE */
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/private/apu_select_dbm.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/private/apu_select_dbm.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/arm/include/private/apu_select_dbm.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/arm/include/private/apu_select_dbm.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,28 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef APU_SELECT_DBM_H
++#define APU_SELECT_DBM_H
++
++/*
++** The following macros control what features APRUTIL will use
++*/
++#define APU_USE_SDBM    1
++#define APU_USE_NDBM    0
++#define APU_USE_GDBM    0
++#define APU_USE_DB      0
++
++#endif	/* !APU_SELECT_DBM_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apr_ldap.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apr_ldap.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apr_ldap.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apr_ldap.h	2020-05-11 17:48:18.129745055 +0100
+@@ -0,0 +1,197 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * apr_ldap.h is generated from apr_ldap.h.in by configure -- do not edit apr_ldap.h
++ */
++/**
++ * @file apr_ldap.h
++ * @brief  APR-UTIL LDAP 
++ */
++#ifndef APU_LDAP_H
++#define APU_LDAP_H
++
++/**
++ * @defgroup APR_Util_LDAP LDAP
++ * @ingroup APR_Util
++ * @{
++ */
++
++/* this will be defined if LDAP support was compiled into apr-util */
++#define APR_HAS_LDAP		  0
++
++/* identify the LDAP toolkit used */
++#define APR_HAS_NETSCAPE_LDAPSDK  0
++#define APR_HAS_SOLARIS_LDAPSDK   0
++#define APR_HAS_NOVELL_LDAPSDK    0
++#define APR_HAS_MOZILLA_LDAPSDK   0
++#define APR_HAS_OPENLDAP_LDAPSDK  0
++#define APR_HAS_MICROSOFT_LDAPSDK 0
++#define APR_HAS_TIVOLI_LDAPSDK    0
++#define APR_HAS_ZOS_LDAPSDK       0
++#define APR_HAS_OTHER_LDAPSDK     0
++
++
++/*
++ * Handle the case when LDAP is enabled
++ */
++#if APR_HAS_LDAP
++
++/*
++ * The following #defines are DEPRECATED and should not be used for
++ * anything. They remain to maintain binary compatibility.
++ * The original code defined the OPENLDAP SDK as present regardless
++ * of what really was there, which was way bogus. In addition, the
++ * apr_ldap_url_parse*() functions have been rewritten specifically for
++ * APR, so the APR_HAS_LDAP_URL_PARSE macro is forced to zero.
++ */
++#if APR_HAS_TIVOLI_LDAPSDK
++#define APR_HAS_LDAP_SSL 0
++#else
++#define APR_HAS_LDAP_SSL 1
++#endif
++#define APR_HAS_LDAP_URL_PARSE      0
++
++#if APR_HAS_OPENLDAP_LDAPSDK && !defined(LDAP_DEPRECATED) 
++/* Ensure that the "deprecated" interfaces are still exposed
++ * with OpenLDAP >= 2.3; these were exposed by default in earlier
++ * releases. */
++#define LDAP_DEPRECATED 1
++#endif
++
++/*
++ * Include the standard LDAP header files.
++ */
++
++
++
++
++
++
++/*
++ * Detected standard functions
++ */
++#define APR_HAS_LDAPSSL_CLIENT_INIT 0
++#define APR_HAS_LDAPSSL_CLIENT_DEINIT 0
++#define APR_HAS_LDAPSSL_ADD_TRUSTED_CERT 0
++#define APR_HAS_LDAP_START_TLS_S 0
++#define APR_HAS_LDAP_SSLINIT 0
++#define APR_HAS_LDAPSSL_INIT 0
++#define APR_HAS_LDAPSSL_INSTALL_ROUTINES 0
++
++/*
++ * Make sure the secure LDAP port is defined
++ */
++#ifndef LDAPS_PORT
++#define LDAPS_PORT 636  /* ldaps:/// default LDAP over TLS port */
++#endif
++
++/*
++ * For ldap function calls that input a size limit on the number of returned elements
++ * Some SDKs do not have the define for LDAP_DEFAULT_LIMIT (-1) or LDAP_NO_LIMIT (0)
++ * LDAP_DEFAULT_LIMIT is preferred as it allows inheritance from whatever the SDK
++ * or process is configured for.
++ */
++#ifdef LDAP_DEFAULT_LIMIT
++#define APR_LDAP_SIZELIMIT LDAP_DEFAULT_LIMIT
++#else
++#ifdef LDAP_NO_LIMIT
++#define APR_LDAP_SIZELIMIT LDAP_NO_LIMIT
++#endif
++#endif
++
++#ifndef APR_LDAP_SIZELIMIT
++#define APR_LDAP_SIZELIMIT 0 /* equivalent to LDAP_NO_LIMIT, and what goes on the wire */
++#endif
++
++/*
++ * z/OS is missing some defines
++ */
++#ifndef LDAP_VERSION_MAX
++#define LDAP_VERSION_MAX  LDAP_VERSION
++#endif
++#if APR_HAS_ZOS_LDAPSDK
++#define LDAP_VENDOR_NAME "IBM z/OS"
++#endif
++
++/* Note: Macros defining const casting has been removed in APR v1.0,
++ * pending real support for LDAP v2.0 toolkits.
++ *
++ * In the mean time, please use an LDAP v3.0 toolkit.
++ */
++#if LDAP_VERSION_MAX <= 2
++#error Support for LDAP v2.0 toolkits has been removed from apr-util. Please use an LDAP v3.0 toolkit.
++#endif 
++
++#ifdef __cplusplus
++extern "C" {
++#endif /* __cplusplus */
++
++/**
++ * This structure allows the C LDAP API error codes to be returned
++ * along with plain text error messages that explain to us mere mortals
++ * what really happened.
++ */
++typedef struct apr_ldap_err_t {
++    const char *reason;
++    const char *msg;
++    int rc;
++} apr_ldap_err_t;
++
++#ifdef __cplusplus
++}
++#endif
++
++/* The MS SDK returns LDAP_UNAVAILABLE when the backend has closed the connection
++ * between LDAP calls. Protect with APR_HAS_MICROSOFT_LDAPSDK in case someone 
++ * manually chooses another SDK on Windows 
++ */
++#if APR_HAS_MICROSOFT_LDAPSDK
++#define APR_LDAP_IS_SERVER_DOWN(s)    ((s) == LDAP_SERVER_DOWN \
++                                    || (s) == LDAP_UNAVAILABLE)
++#else
++#define APR_LDAP_IS_SERVER_DOWN(s)    ((s) == LDAP_SERVER_DOWN)
++#endif
++
++/* These symbols are not actually exported in a DSO build, but mapped into
++ * a private exported function array for apr_ldap_stub to bind dynamically.
++ * Rename them appropriately to protect the global namespace.
++ */
++#ifdef APU_DSO_LDAP_BUILD
++
++#define apr_ldap_info apr__ldap_info
++#define apr_ldap_init apr__ldap_init
++#define apr_ldap_ssl_init apr__ldap_ssl_init
++#define apr_ldap_ssl_deinit apr__ldap_ssl_deinit
++#define apr_ldap_get_option apr__ldap_get_option
++#define apr_ldap_set_option apr__ldap_set_option
++#define apr_ldap_rebind_init apr__ldap_rebind_init
++#define apr_ldap_rebind_add apr__ldap_rebind_add
++#define apr_ldap_rebind_remove apr__ldap_rebind_remove
++
++#define APU_DECLARE_LDAP(type) type
++#else
++#define APU_DECLARE_LDAP(type) APU_DECLARE(type)
++#endif
++
++#include "apr_ldap_url.h"
++#include "apr_ldap_init.h"
++#include "apr_ldap_option.h"
++#include "apr_ldap_rebind.h"
++
++/** @} */
++#endif /* APR_HAS_LDAP */
++#endif /* APU_LDAP_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apu.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apu.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apu.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apu.h	2020-05-11 17:48:18.139744740 +0100
+@@ -0,0 +1,110 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * apu.h is generated from apu.h.in by configure -- do not edit apu.h
++ */
++/* @file apu.h
++ * @brief APR-Utility main file
++ */
++/**
++ * @defgroup APR_Util APR Utility Functions
++ * @{
++ */
++
++
++#ifndef APU_H
++#define APU_H
++
++/**
++ * APU_DECLARE_EXPORT is defined when building the APR-UTIL dynamic library,
++ * so that all public symbols are exported.
++ *
++ * APU_DECLARE_STATIC is defined when including the APR-UTIL public headers,
++ * to provide static linkage when the dynamic library may be unavailable.
++ *
++ * APU_DECLARE_STATIC and APU_DECLARE_EXPORT are left undefined when
++ * including the APR-UTIL public headers, to import and link the symbols from 
++ * the dynamic APR-UTIL library and assure appropriate indirection and calling
++ * conventions at compile time.
++ */
++
++/**
++ * The public APR-UTIL functions are declared with APU_DECLARE(), so they may
++ * use the most appropriate calling convention.  Public APR functions with 
++ * variable arguments must use APU_DECLARE_NONSTD().
++ *
++ * @fn APU_DECLARE(rettype) apr_func(args);
++ */
++#define APU_DECLARE(type)            type
++/**
++ * The public APR-UTIL functions using variable arguments are declared with 
++ * APU_DECLARE_NONSTD(), as they must use the C language calling convention.
++ *
++ * @fn APU_DECLARE_NONSTD(rettype) apr_func(args, ...);
++ */
++#define APU_DECLARE_NONSTD(type)     type
++/**
++ * The public APR-UTIL variables are declared with APU_DECLARE_DATA.
++ * This assures the appropriate indirection is invoked at compile time.
++ *
++ * @fn APU_DECLARE_DATA type apr_variable;
++ * @note APU_DECLARE_DATA extern type apr_variable; syntax is required for
++ * declarations within headers to properly import the variable.
++ */
++#define APU_DECLARE_DATA
++
++#if !defined(WIN32) || defined(APU_MODULE_DECLARE_STATIC)
++/**
++ * Declare a dso module's exported module structure as APU_MODULE_DECLARE_DATA.
++ *
++ * Unless APU_MODULE_DECLARE_STATIC is defined at compile time, symbols 
++ * declared with APU_MODULE_DECLARE_DATA are always exported.
++ * @code
++ * module APU_MODULE_DECLARE_DATA mod_tag
++ * @endcode
++ */
++#define APU_MODULE_DECLARE_DATA
++#else
++#define APU_MODULE_DECLARE_DATA           __declspec(dllexport)
++#endif
++
++/*
++ * we always have SDBM (it's in our codebase)
++ */
++#define APU_HAVE_SDBM   1
++#define APU_HAVE_GDBM   0
++#define APU_HAVE_NDBM   0
++#define APU_HAVE_DB     0
++
++#if APU_HAVE_DB
++#define APU_HAVE_DB_VERSION    0
++#endif
++
++#define APU_HAVE_PGSQL         1
++#define APU_HAVE_MYSQL         0
++#define APU_HAVE_SQLITE3       1
++#define APU_HAVE_SQLITE2       0
++#define APU_HAVE_ORACLE        0
++#define APU_HAVE_FREETDS       0
++#define APU_HAVE_ODBC          0
++
++#define APU_HAVE_APR_ICONV     0
++#define APU_HAVE_ICONV         1
++#define APR_HAS_XLATE          (APU_HAVE_APR_ICONV || APU_HAVE_ICONV)
++
++#endif /* APU_H */
++/** @} */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apu_want.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apu_want.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/apu_want.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/apu_want.h	2020-05-11 17:48:18.139744740 +0100
+@@ -0,0 +1,51 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#include "apu.h"        /* configuration data */
++
++/**
++ * @file apu_want.h
++ * @brief APR Standard Headers Support
++ *
++ * <PRE>
++ * Features:
++ *
++ *   APU_WANT_DB:       <db.h>
++ *
++ * Typical usage:
++ *
++ *   #define APU_WANT_DB
++ *   #include "apu_want.h"
++ *
++ * The appropriate headers will be included.
++ *
++ * Note: it is safe to use this in a header (it won't interfere with other
++ *       headers' or source files' use of apu_want.h)
++ * </PRE>
++ */
++
++/* --------------------------------------------------------------------- */
++
++#ifdef APU_WANT_DB
++
++#if APU_HAVE_DB
++#include <db.h>
++#endif
++
++#undef APU_WANT_DB
++#endif
++
++/* --------------------------------------------------------------------- */
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_config.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_config.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_config.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_config.h	2020-05-11 17:48:18.139744740 +0100
+@@ -0,0 +1,149 @@
++/* include/private/apu_config.h.  Generated from apu_config.h.in by configure.  */
++/* include/private/apu_config.h.in.  Generated from configure.in by autoheader.  */
++
++/* Define if the system crypt() function is threadsafe */
++/* #undef APU_CRYPT_THREADSAFE */
++
++/* Define to 1 if modular components are built as DSOs */
++#define APU_DSO_BUILD 1
++
++/* Define to be absolute path to DSO directory */
++#define APU_DSO_LIBDIR "/usr/local/apr/lib/apr-util-1"
++
++/* Define if the inbuf parm to iconv() is const char ** */
++/* #undef APU_ICONV_INBUF_CONST */
++
++/* Define if crypt_r has uses CRYPTD */
++/* #undef CRYPT_R_CRYPTD */
++
++/* Define if crypt_r uses struct crypt_data */
++#define CRYPT_R_STRUCT_CRYPT_DATA 1
++
++/* Define if CODESET is defined in langinfo.h */
++#define HAVE_CODESET 1
++
++/* Define to 1 if you have the `crypt_r' function. */
++#define HAVE_CRYPT_R 1
++
++/* Define if expat.h is available */
++#define HAVE_EXPAT_H 1
++
++/* Define to 1 if you have the <freetds/sybdb.h> header file. */
++/* #undef HAVE_FREETDS_SYBDB_H */
++
++/* Define to 1 if you have the <iconv.h> header file. */
++#define HAVE_ICONV_H 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the <langinfo.h> header file. */
++#define HAVE_LANGINFO_H 1
++
++/* Define to 1 if you have the <lber.h> header file. */
++/* #undef HAVE_LBER_H */
++
++/* Defined if ldap.h is present */
++/* #undef HAVE_LDAP_H */
++
++/* Define to 1 if you have the <ldap_ssl.h> header file. */
++/* #undef HAVE_LDAP_SSL_H */
++
++/* Define to 1 if you have the <libpq-fe.h> header file. */
++#define HAVE_LIBPQ_FE_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define to 1 if you have the <mysql.h> header file. */
++/* #undef HAVE_MYSQL_H */
++
++/* Define to 1 if you have the <mysql/mysql.h> header file. */
++/* #undef HAVE_MYSQL_MYSQL_H */
++
++/* Define to 1 if you have the <mysql/my_global.h> header file. */
++/* #undef HAVE_MYSQL_MY_GLOBAL_H */
++
++/* Define to 1 if you have the <mysql/my_sys.h> header file. */
++/* #undef HAVE_MYSQL_MY_SYS_H */
++
++/* Define to 1 if you have the <my_global.h> header file. */
++/* #undef HAVE_MY_GLOBAL_H */
++
++/* Define to 1 if you have the <my_sys.h> header file. */
++/* #undef HAVE_MY_SYS_H */
++
++/* Define to 1 if you have the `nl_langinfo' function. */
++#define HAVE_NL_LANGINFO 1
++
++/* Define to 1 if you have the <oci.h> header file. */
++/* #undef HAVE_OCI_H */
++
++/* Define to 1 if you have the <odbc/sql.h> header file. */
++/* #undef HAVE_ODBC_SQL_H */
++
++/* Define to 1 if you have the <postgresql/libpq-fe.h> header file. */
++/* #undef HAVE_POSTGRESQL_LIBPQ_FE_H */
++
++/* Define to 1 if you have the <sqlite3.h> header file. */
++#define HAVE_SQLITE3_H 1
++
++/* Define to 1 if you have the <sqlite.h> header file. */
++/* #undef HAVE_SQLITE_H */
++
++/* Define to 1 if you have the <sql.h> header file. */
++/* #undef HAVE_SQL_H */
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the <sybdb.h> header file. */
++/* #undef HAVE_SYBDB_H */
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Define if xmlparse/xmlparse.h is available */
++/* #undef HAVE_XMLPARSE_XMLPARSE_H */
++
++/* Define if xmltok/xmlparse.h is available */
++/* #undef HAVE_XMLTOK_XMLPARSE_H */
++
++/* Define if xml/xmlparse.h is available */
++/* #undef HAVE_XML_XMLPARSE_H */
++
++/* Define if ldap_set_rebind_proc takes three arguments */
++/* #undef LDAP_SET_REBIND_PROC_THREE */
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
+diff -Naur incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_select_dbm.h incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_select_dbm.h
+--- incubator-pagespeed-mod.orig/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_select_dbm.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/aprutil/gen/arch/linux/armv7l/include/private/apu_select_dbm.h	2020-05-11 17:48:18.139744740 +0100
+@@ -0,0 +1,28 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#ifndef APU_SELECT_DBM_H
++#define APU_SELECT_DBM_H
++
++/*
++** The following macros control what features APRUTIL will use
++*/
++#define APU_USE_SDBM    1
++#define APU_USE_NDBM    0
++#define APU_USE_GDBM    0
++#define APU_USE_DB      0
++
++#endif	/* !APU_SELECT_DBM_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/boringssl/src/crypto/crypto.c incubator-pagespeed-mod/third_party/boringssl/src/crypto/crypto.c
+--- incubator-pagespeed-mod.orig/third_party/boringssl/src/crypto/crypto.c	2020-05-11 17:34:39.705229920 +0100
++++ incubator-pagespeed-mod/third_party/boringssl/src/crypto/crypto.c	2020-05-11 17:48:18.139744740 +0100
+@@ -59,30 +59,6 @@
+ 
+ #include <openssl/arm_arch.h>
+ 
+-#if defined(OPENSSL_STATIC_ARMCAP)
+-
+-uint32_t OPENSSL_armcap_P =
+-#if defined(OPENSSL_STATIC_ARMCAP_NEON) || defined(__ARM_NEON__)
+-    ARMV7_NEON |
+-#endif
+-#if defined(OPENSSL_STATIC_ARMCAP_AES)
+-    ARMV8_AES |
+-#endif
+-#if defined(OPENSSL_STATIC_ARMCAP_SHA1)
+-    ARMV8_SHA1 |
+-#endif
+-#if defined(OPENSSL_STATIC_ARMCAP_SHA256)
+-    ARMV8_SHA256 |
+-#endif
+-#if defined(OPENSSL_STATIC_ARMCAP_PMULL)
+-    ARMV8_PMULL |
+-#endif
+-    0;
+-
+-#else
+-uint32_t OPENSSL_armcap_P = 0;
+-#endif
+-
+ #endif
+ 
+ 
+diff -Naur incubator-pagespeed-mod.orig/third_party/chromium/src/base/atomicops_internals_arm_gcc.h incubator-pagespeed-mod/third_party/chromium/src/base/atomicops_internals_arm_gcc.h
+--- incubator-pagespeed-mod.orig/third_party/chromium/src/base/atomicops_internals_arm_gcc.h	2020-05-11 17:34:46.065035576 +0100
++++ incubator-pagespeed-mod/third_party/chromium/src/base/atomicops_internals_arm_gcc.h	2020-05-11 17:48:18.249741276 +0100
+@@ -59,7 +59,8 @@
+ // variant of the target architecture is being used. This tests against
+ // any known ARMv6 or ARMv7 variant, where it is possible to directly
+ // use ldrex/strex instructions to implement fast atomic operations.
+-#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || \
++#if defined(__ARM_ARCH_8__) || defined(__ARM_ARCH_8A__) || \
++    defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || \
+     defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__) || \
+     defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || \
+     defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6Z__) || \
+diff -Naur incubator-pagespeed-mod.orig/third_party/chromium/src/build/common.gypi incubator-pagespeed-mod/third_party/chromium/src/build/common.gypi
+--- incubator-pagespeed-mod.orig/third_party/chromium/src/build/common.gypi	2020-05-11 17:34:47.324997063 +0100
++++ incubator-pagespeed-mod/third_party/chromium/src/build/common.gypi	2020-05-11 17:48:18.379737183 +0100
+@@ -748,7 +748,7 @@
+           'enable_settings_app%': 0,
+         }],
+ 
+-        ['OS=="linux" and target_arch=="arm" and chromeos==0', {
++        ['OS=="linux" and target_arch=="disabled" and chromeos==0', {
+           # Set some defaults for arm/linux chrome builds
+           # TODO(dmikurube): Change the default of use_allocator to "none".
+           # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+@@ -757,7 +757,7 @@
+           # sysroot needs to be an absolute path otherwise it generates
+           # incorrect results when passed to pkg-config
+           'sysroot%': '<!(cd <(DEPTH) && pwd -P)/arm-sysroot',
+-        }], # OS=="linux" and target_arch=="arm" and chromeos==0
++        }], # OS=="linux" and target_arch=="disabled" and chromeos==0
+ 
+         ['OS=="linux" and branding=="Chrome" and buildtype=="Official" and chromeos==0', {
+           'conditions': [
+@@ -1945,7 +1945,7 @@
+           }],
+         ],
+         # Change the default to hard once the armhf transition is complete.
+-        'arm_float_abi%': 'softfp',
++        'arm_float_abi%': 'hard',
+         'arm_thumb%': 1,
+       }],
+ 
+diff -Naur incubator-pagespeed-mod.orig/third_party/google-sparsehash/gen/arch/linux/arm/include/google/sparsehash/sparseconfig.h incubator-pagespeed-mod/third_party/google-sparsehash/gen/arch/linux/arm/include/google/sparsehash/sparseconfig.h
+--- incubator-pagespeed-mod.orig/third_party/google-sparsehash/gen/arch/linux/arm/include/google/sparsehash/sparseconfig.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/google-sparsehash/gen/arch/linux/arm/include/google/sparsehash/sparseconfig.h	2020-05-11 17:48:18.379737183 +0100
+@@ -0,0 +1,58 @@
++/*
++ * NOTE: This file is for internal use only.
++ *       Do not use these #defines in your own program!
++ */
++
++/* Namespace for Google classes */
++#define GOOGLE_NAMESPACE ::google
++
++#if __cplusplus >= 201103L
++
++#define HASH_FUN_H <functional>
++#define HASH_NAMESPACE std
++
++#else
++
++/* the location of the header defining hash functions */
++#define HASH_FUN_H <tr1/functional>
++
++/* the namespace of the hash<> function */
++#define HASH_NAMESPACE std::tr1
++
++#endif
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if the system has the type `long long'. */
++#define HAVE_LONG_LONG 1
++
++/* Define to 1 if you have the `memcpy' function. */
++#define HAVE_MEMCPY 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if the system has the type `uint16_t'. */
++#define HAVE_UINT16_T 1
++
++/* Define to 1 if the system has the type `u_int16_t'. */
++#define HAVE_U_INT16_T 1
++
++/* Define to 1 if the system has the type `__uint16'. */
++/* #undef HAVE___UINT16 */
++
++/* The system-provided hash function including the namespace. */
++#define SPARSEHASH_HASH HASH_NAMESPACE::hash
++
++/* the namespace where STL code like vector<> is defined */
++#define STL_NAMESPACE std
++
++/* Stops putting the code inside the Google namespace */
++#define _END_GOOGLE_NAMESPACE_ }
++
++/* Puts following code inside the Google namespace */
++#define _START_GOOGLE_NAMESPACE_ namespace google {
+diff -Naur incubator-pagespeed-mod.orig/third_party/google-sparsehash/gen/arch/linux/armv7l/include/google/sparsehash/sparseconfig.h incubator-pagespeed-mod/third_party/google-sparsehash/gen/arch/linux/armv7l/include/google/sparsehash/sparseconfig.h
+--- incubator-pagespeed-mod.orig/third_party/google-sparsehash/gen/arch/linux/armv7l/include/google/sparsehash/sparseconfig.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/google-sparsehash/gen/arch/linux/armv7l/include/google/sparsehash/sparseconfig.h	2020-05-11 17:48:18.379737183 +0100
+@@ -0,0 +1,58 @@
++/*
++ * NOTE: This file is for internal use only.
++ *       Do not use these #defines in your own program!
++ */
++
++/* Namespace for Google classes */
++#define GOOGLE_NAMESPACE ::google
++
++#if __cplusplus >= 201103L
++
++#define HASH_FUN_H <functional>
++#define HASH_NAMESPACE std
++
++#else
++
++/* the location of the header defining hash functions */
++#define HASH_FUN_H <tr1/functional>
++
++/* the namespace of the hash<> function */
++#define HASH_NAMESPACE std::tr1
++
++#endif
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if the system has the type `long long'. */
++#define HAVE_LONG_LONG 1
++
++/* Define to 1 if you have the `memcpy' function. */
++#define HAVE_MEMCPY 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if the system has the type `uint16_t'. */
++#define HAVE_UINT16_T 1
++
++/* Define to 1 if the system has the type `u_int16_t'. */
++#define HAVE_U_INT16_T 1
++
++/* Define to 1 if the system has the type `__uint16'. */
++/* #undef HAVE___UINT16 */
++
++/* The system-provided hash function including the namespace. */
++#define SPARSEHASH_HASH HASH_NAMESPACE::hash
++
++/* the namespace where STL code like vector<> is defined */
++#define STL_NAMESPACE std
++
++/* Stops putting the code inside the Google namespace */
++#define _END_GOOGLE_NAMESPACE_ }
++
++/* Puts following code inside the Google namespace */
++#define _START_GOOGLE_NAMESPACE_ namespace google {
+diff -Naur incubator-pagespeed-mod.orig/third_party/grpc/src/src/core/lib/support/log_linux.c incubator-pagespeed-mod/third_party/grpc/src/src/core/lib/support/log_linux.c
+--- incubator-pagespeed-mod.orig/third_party/grpc/src/src/core/lib/support/log_linux.c	2020-05-11 17:34:49.334935618 +0100
++++ incubator-pagespeed-mod/third_party/grpc/src/src/core/lib/support/log_linux.c	2020-05-11 17:48:18.379737183 +0100
+@@ -39,7 +39,7 @@
+ #include <time.h>
+ #include <unistd.h>
+ 
+-static long gettid(void) { return syscall(__NR_gettid); }
++static long local_gettid(void) { return syscall(__NR_gettid); }
+ 
+ void gpr_log(const char *file, int line, gpr_log_severity severity,
+              const char *format, ...) {
+@@ -65,7 +65,7 @@
+   gpr_timespec now = gpr_now(GPR_CLOCK_REALTIME);
+   struct tm tm;
+   static __thread long tid = 0;
+-  if (tid == 0) tid = gettid();
++  if (tid == 0) tid = local_gettid();
+ 
+   timer = (time_t)now.tv_sec;
+   final_slash = strrchr(args->file, '/');
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/arm/include/ap_config_auto.h incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/arm/include/ap_config_auto.h
+--- incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/arm/include/ap_config_auto.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/arm/include/ap_config_auto.h	2020-05-11 17:48:18.609729941 +0100
+@@ -0,0 +1,261 @@
++/* include/ap_config_auto.h.  Generated from ap_config_auto.h.in by configure.  */
++/* include/ap_config_auto.h.in.  Generated from configure.in by autoheader.  */
++
++/* Location of the source for the current MPM */
++#define APACHE_MPM_DIR "server/mpm/prefork"
++
++/* SuExec root directory */
++/* #undef AP_DOC_ROOT */
++
++/* Allow modules to run hook after a fatal exception */
++/* #undef AP_ENABLE_EXCEPTION_HOOK */
++
++/* Allow IPv4 connections on IPv6 listening sockets */
++#define AP_ENABLE_V4_MAPPED 1
++
++/* Minimum allowed GID */
++/* #undef AP_GID_MIN */
++
++/* User allowed to call SuExec */
++/* #undef AP_HTTPD_USER */
++
++/* SuExec log file */
++/* #undef AP_LOG_EXEC */
++
++/* Listening sockets are non-blocking when there are more than 1 */
++#define AP_NONBLOCK_WHEN_MULTI_LISTEN 1
++
++/* safe shell path for SuExec */
++/* #undef AP_SAFE_PATH */
++
++/* umask for suexec'd process */
++/* #undef AP_SUEXEC_UMASK */
++
++/* Location of the MIME types config file, relative to the Apache root
++   directory */
++#define AP_TYPES_CONFIG_FILE "conf/mime.types"
++
++/* Minimum allowed UID */
++/* #undef AP_UID_MIN */
++
++/* User subdirectory */
++/* #undef AP_USERDIR_SUFFIX */
++
++/* Using autoconf to configure Apache */
++#define AP_USING_AUTOCONF 1
++
++/* Define to 1 if you have the `bindprocessor' function. */
++/* #undef HAVE_BINDPROCESSOR */
++
++/* Define to 1 if you have the <bstring.h> header file. */
++/* #undef HAVE_BSTRING_H */
++
++/* Define if distcache support is enabled */
++/* #undef HAVE_DISTCACHE */
++
++/* Define to 1 if you have the `ENGINE_init' function. */
++/* #undef HAVE_ENGINE_INIT */
++
++/* Define to 1 if you have the `ENGINE_load_builtin_engines' function. */
++/* #undef HAVE_ENGINE_LOAD_BUILTIN_ENGINES */
++
++/* Define to 1 if you have the `getgrnam' function. */
++#define HAVE_GETGRNAM 1
++
++/* Define to 1 if you have the `getpgid' function. */
++#define HAVE_GETPGID 1
++
++/* Define to 1 if you have the `getpwnam' function. */
++#define HAVE_GETPWNAM 1
++
++/* Define if struct tm has a tm_gmtoff field */
++#define HAVE_GMTOFF 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define to 1 if you have the `initgroups' function. */
++#define HAVE_INITGROUPS 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the `killpg' function. */
++#define HAVE_KILLPG 1
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define if SSL is supported using OpenSSL */
++/* #undef HAVE_OPENSSL */
++
++/* Define to 1 if you have the <openssl/engine.h> header file. */
++/* #undef HAVE_OPENSSL_ENGINE_H */
++
++/* Define to 1 if you have the <openssl/opensslv.h> header file. */
++/* #undef HAVE_OPENSSL_OPENSSLV_H */
++
++/* Define to 1 if you have the <openssl/ssl.h> header file. */
++/* #undef HAVE_OPENSSL_SSL_H */
++
++/* Define to 1 if you have the `prctl' function. */
++#define HAVE_PRCTL 1
++
++/* Define to 1 if you have the `pthread_kill' function. */
++/* #undef HAVE_PTHREAD_KILL */
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define if SSL is supported using SSL-C */
++/* #undef HAVE_SSLC */
++
++/* Define to 1 if you have the <sslc.h> header file. */
++/* #undef HAVE_SSLC_H */
++
++/* Define to 1 if you have the `SSLC_library_version' function. */
++/* #undef HAVE_SSLC_LIBRARY_VERSION */
++
++/* Define to 1 if you have the `SSLeay_version' function. */
++/* #undef HAVE_SSLEAY_VERSION */
++
++/* Define to 1 if you have the `SSL_CTX_new' function. */
++/* #undef HAVE_SSL_CTX_NEW */
++
++/* Define to 1 if you have the `SSL_set_cert_store' function. */
++/* #undef HAVE_SSL_SET_CERT_STORE */
++
++/* Define to 1 if you have the `SSL_set_state' function. */
++/* #undef HAVE_SSL_SET_STATE */
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `syslog' function. */
++/* #undef HAVE_SYSLOG */
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/prctl.h> header file. */
++#define HAVE_SYS_PRCTL_H 1
++
++/* Define to 1 if you have the <sys/processor.h> header file. */
++/* #undef HAVE_SYS_PROCESSOR_H */
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/times.h> header file. */
++#define HAVE_SYS_TIMES_H 1
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define to 1 if you have the `timegm' function. */
++#define HAVE_TIMEGM 1
++
++/* Define to 1 if you have the `times' function. */
++#define HAVE_TIMES 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Root directory of the Apache install area */
++/* #define HTTPD_ROOT "/usr/local/apache2" */
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Location of the config file, relative to the Apache root directory */
++#define SERVER_CONFIG_FILE "conf/httpd.conf"
++
++/* This platform doesn't suffer from the thundering herd problem */
++#define SINGLE_LISTEN_UNSERIALIZED_ACCEPT 1
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Path to suexec binary */
++/* #undef SUEXEC_BIN */
++
++/* Define to 1 if on AIX 3.
++   System headers sometimes define this.
++   We just want to avoid a redefinition error message.  */
++#ifndef _ALL_SOURCE
++/* # undef _ALL_SOURCE */
++#endif
++
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Enable extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to 'int' if <sys/resource.h> doesn't define it for us */
++/* #undef rlim_t */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/arm/include/ap_config_layout.h incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/arm/include/ap_config_layout.h
+--- incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/arm/include/ap_config_layout.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/arm/include/ap_config_layout.h	2020-05-11 17:48:18.609729941 +0100
+@@ -0,0 +1,66 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @file  ap_config_layout.h
++ * @brief Apache Config Layout
++ */
++
++#ifndef AP_CONFIG_LAYOUT_H
++#define AP_CONFIG_LAYOUT_H
++
++/* Configured Apache directory layout */
++/*
++#define DEFAULT_PREFIX "/usr/local/apache2"
++#define DEFAULT_EXP_EXEC_PREFIX "/usr/local/apache2"
++#define DEFAULT_REL_EXEC_PREFIX ""
++#define DEFAULT_EXP_BINDIR "/usr/local/apache2/bin"
++#define DEFAULT_REL_BINDIR "bin"
++#define DEFAULT_EXP_SBINDIR "/usr/local/apache2/bin"
++#define DEFAULT_REL_SBINDIR "bin"
++#define DEFAULT_EXP_LIBEXECDIR "/usr/local/apache2/modules"
++#define DEFAULT_REL_LIBEXECDIR "modules"
++#define DEFAULT_EXP_MANDIR "/usr/local/apache2/man"
++#define DEFAULT_REL_MANDIR "man"
++#define DEFAULT_EXP_SYSCONFDIR "/usr/local/apache2/conf"
++#define DEFAULT_REL_SYSCONFDIR "conf"
++#define DEFAULT_EXP_DATADIR "/usr/local/apache2"
++#define DEFAULT_REL_DATADIR ""
++#define DEFAULT_EXP_INSTALLBUILDDIR "/usr/local/apache2/build"
++#define DEFAULT_REL_INSTALLBUILDDIR "build"
++#define DEFAULT_EXP_ERRORDIR "/usr/local/apache2/error"
++#define DEFAULT_REL_ERRORDIR "error"
++#define DEFAULT_EXP_ICONSDIR "/usr/local/apache2/icons"
++#define DEFAULT_REL_ICONSDIR "icons"
++#define DEFAULT_EXP_HTDOCSDIR "/usr/local/apache2/htdocs"
++#define DEFAULT_REL_HTDOCSDIR "htdocs"
++#define DEFAULT_EXP_MANUALDIR "/usr/local/apache2/manual"
++#define DEFAULT_REL_MANUALDIR "manual"
++#define DEFAULT_EXP_CGIDIR "/usr/local/apache2/cgi-bin"
++#define DEFAULT_REL_CGIDIR "cgi-bin"
++#define DEFAULT_EXP_INCLUDEDIR "/usr/local/apache2/include"
++#define DEFAULT_REL_INCLUDEDIR "include"
++#define DEFAULT_EXP_LOCALSTATEDIR "/usr/local/apache2"
++#define DEFAULT_REL_LOCALSTATEDIR ""
++#define DEFAULT_EXP_RUNTIMEDIR "/usr/local/apache2/logs"
++#define DEFAULT_REL_RUNTIMEDIR "logs"
++#define DEFAULT_EXP_LOGFILEDIR "/usr/local/apache2/logs"
++#define DEFAULT_REL_LOGFILEDIR "logs"
++#define DEFAULT_EXP_PROXYCACHEDIR "/usr/local/apache2/proxy"
++#define DEFAULT_REL_PROXYCACHEDIR "proxy"
++*/
++
++#endif /* AP_CONFIG_LAYOUT_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_auto.h incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_auto.h
+--- incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_auto.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_auto.h	2020-05-11 17:48:18.609729941 +0100
+@@ -0,0 +1,261 @@
++/* include/ap_config_auto.h.  Generated from ap_config_auto.h.in by configure.  */
++/* include/ap_config_auto.h.in.  Generated from configure.in by autoheader.  */
++
++/* Location of the source for the current MPM */
++#define APACHE_MPM_DIR "server/mpm/prefork"
++
++/* SuExec root directory */
++/* #undef AP_DOC_ROOT */
++
++/* Allow modules to run hook after a fatal exception */
++/* #undef AP_ENABLE_EXCEPTION_HOOK */
++
++/* Allow IPv4 connections on IPv6 listening sockets */
++#define AP_ENABLE_V4_MAPPED 1
++
++/* Minimum allowed GID */
++/* #undef AP_GID_MIN */
++
++/* User allowed to call SuExec */
++/* #undef AP_HTTPD_USER */
++
++/* SuExec log file */
++/* #undef AP_LOG_EXEC */
++
++/* Listening sockets are non-blocking when there are more than 1 */
++#define AP_NONBLOCK_WHEN_MULTI_LISTEN 1
++
++/* safe shell path for SuExec */
++/* #undef AP_SAFE_PATH */
++
++/* umask for suexec'd process */
++/* #undef AP_SUEXEC_UMASK */
++
++/* Location of the MIME types config file, relative to the Apache root
++   directory */
++#define AP_TYPES_CONFIG_FILE "conf/mime.types"
++
++/* Minimum allowed UID */
++/* #undef AP_UID_MIN */
++
++/* User subdirectory */
++/* #undef AP_USERDIR_SUFFIX */
++
++/* Using autoconf to configure Apache */
++#define AP_USING_AUTOCONF 1
++
++/* Define to 1 if you have the `bindprocessor' function. */
++/* #undef HAVE_BINDPROCESSOR */
++
++/* Define to 1 if you have the <bstring.h> header file. */
++/* #undef HAVE_BSTRING_H */
++
++/* Define if distcache support is enabled */
++/* #undef HAVE_DISTCACHE */
++
++/* Define to 1 if you have the `ENGINE_init' function. */
++/* #undef HAVE_ENGINE_INIT */
++
++/* Define to 1 if you have the `ENGINE_load_builtin_engines' function. */
++/* #undef HAVE_ENGINE_LOAD_BUILTIN_ENGINES */
++
++/* Define to 1 if you have the `getgrnam' function. */
++#define HAVE_GETGRNAM 1
++
++/* Define to 1 if you have the `getpgid' function. */
++#define HAVE_GETPGID 1
++
++/* Define to 1 if you have the `getpwnam' function. */
++#define HAVE_GETPWNAM 1
++
++/* Define if struct tm has a tm_gmtoff field */
++#define HAVE_GMTOFF 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define to 1 if you have the `initgroups' function. */
++#define HAVE_INITGROUPS 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the `killpg' function. */
++#define HAVE_KILLPG 1
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define if SSL is supported using OpenSSL */
++/* #undef HAVE_OPENSSL */
++
++/* Define to 1 if you have the <openssl/engine.h> header file. */
++/* #undef HAVE_OPENSSL_ENGINE_H */
++
++/* Define to 1 if you have the <openssl/opensslv.h> header file. */
++/* #undef HAVE_OPENSSL_OPENSSLV_H */
++
++/* Define to 1 if you have the <openssl/ssl.h> header file. */
++/* #undef HAVE_OPENSSL_SSL_H */
++
++/* Define to 1 if you have the `prctl' function. */
++#define HAVE_PRCTL 1
++
++/* Define to 1 if you have the `pthread_kill' function. */
++/* #undef HAVE_PTHREAD_KILL */
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define if SSL is supported using SSL-C */
++/* #undef HAVE_SSLC */
++
++/* Define to 1 if you have the <sslc.h> header file. */
++/* #undef HAVE_SSLC_H */
++
++/* Define to 1 if you have the `SSLC_library_version' function. */
++/* #undef HAVE_SSLC_LIBRARY_VERSION */
++
++/* Define to 1 if you have the `SSLeay_version' function. */
++/* #undef HAVE_SSLEAY_VERSION */
++
++/* Define to 1 if you have the `SSL_CTX_new' function. */
++/* #undef HAVE_SSL_CTX_NEW */
++
++/* Define to 1 if you have the `SSL_set_cert_store' function. */
++/* #undef HAVE_SSL_SET_CERT_STORE */
++
++/* Define to 1 if you have the `SSL_set_state' function. */
++/* #undef HAVE_SSL_SET_STATE */
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `syslog' function. */
++/* #undef HAVE_SYSLOG */
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/prctl.h> header file. */
++#define HAVE_SYS_PRCTL_H 1
++
++/* Define to 1 if you have the <sys/processor.h> header file. */
++/* #undef HAVE_SYS_PROCESSOR_H */
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/times.h> header file. */
++#define HAVE_SYS_TIMES_H 1
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define to 1 if you have the `timegm' function. */
++#define HAVE_TIMEGM 1
++
++/* Define to 1 if you have the `times' function. */
++#define HAVE_TIMES 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Root directory of the Apache install area */
++/* #define HTTPD_ROOT "/usr/local/apache2" */
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Location of the config file, relative to the Apache root directory */
++#define SERVER_CONFIG_FILE "conf/httpd.conf"
++
++/* This platform doesn't suffer from the thundering herd problem */
++#define SINGLE_LISTEN_UNSERIALIZED_ACCEPT 1
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Path to suexec binary */
++/* #undef SUEXEC_BIN */
++
++/* Define to 1 if on AIX 3.
++   System headers sometimes define this.
++   We just want to avoid a redefinition error message.  */
++#ifndef _ALL_SOURCE
++/* # undef _ALL_SOURCE */
++#endif
++
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Enable extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to 'int' if <sys/resource.h> doesn't define it for us */
++/* #undef rlim_t */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_layout.h incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_layout.h
+--- incubator-pagespeed-mod.orig/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_layout.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd/gen/arch/linux/armv7l/include/ap_config_layout.h	2020-05-11 17:48:18.609729941 +0100
+@@ -0,0 +1,66 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @file  ap_config_layout.h
++ * @brief Apache Config Layout
++ */
++
++#ifndef AP_CONFIG_LAYOUT_H
++#define AP_CONFIG_LAYOUT_H
++
++/* Configured Apache directory layout */
++/*
++#define DEFAULT_PREFIX "/usr/local/apache2"
++#define DEFAULT_EXP_EXEC_PREFIX "/usr/local/apache2"
++#define DEFAULT_REL_EXEC_PREFIX ""
++#define DEFAULT_EXP_BINDIR "/usr/local/apache2/bin"
++#define DEFAULT_REL_BINDIR "bin"
++#define DEFAULT_EXP_SBINDIR "/usr/local/apache2/bin"
++#define DEFAULT_REL_SBINDIR "bin"
++#define DEFAULT_EXP_LIBEXECDIR "/usr/local/apache2/modules"
++#define DEFAULT_REL_LIBEXECDIR "modules"
++#define DEFAULT_EXP_MANDIR "/usr/local/apache2/man"
++#define DEFAULT_REL_MANDIR "man"
++#define DEFAULT_EXP_SYSCONFDIR "/usr/local/apache2/conf"
++#define DEFAULT_REL_SYSCONFDIR "conf"
++#define DEFAULT_EXP_DATADIR "/usr/local/apache2"
++#define DEFAULT_REL_DATADIR ""
++#define DEFAULT_EXP_INSTALLBUILDDIR "/usr/local/apache2/build"
++#define DEFAULT_REL_INSTALLBUILDDIR "build"
++#define DEFAULT_EXP_ERRORDIR "/usr/local/apache2/error"
++#define DEFAULT_REL_ERRORDIR "error"
++#define DEFAULT_EXP_ICONSDIR "/usr/local/apache2/icons"
++#define DEFAULT_REL_ICONSDIR "icons"
++#define DEFAULT_EXP_HTDOCSDIR "/usr/local/apache2/htdocs"
++#define DEFAULT_REL_HTDOCSDIR "htdocs"
++#define DEFAULT_EXP_MANUALDIR "/usr/local/apache2/manual"
++#define DEFAULT_REL_MANUALDIR "manual"
++#define DEFAULT_EXP_CGIDIR "/usr/local/apache2/cgi-bin"
++#define DEFAULT_REL_CGIDIR "cgi-bin"
++#define DEFAULT_EXP_INCLUDEDIR "/usr/local/apache2/include"
++#define DEFAULT_REL_INCLUDEDIR "include"
++#define DEFAULT_EXP_LOCALSTATEDIR "/usr/local/apache2"
++#define DEFAULT_REL_LOCALSTATEDIR ""
++#define DEFAULT_EXP_RUNTIMEDIR "/usr/local/apache2/logs"
++#define DEFAULT_REL_RUNTIMEDIR "logs"
++#define DEFAULT_EXP_LOGFILEDIR "/usr/local/apache2/logs"
++#define DEFAULT_REL_LOGFILEDIR "logs"
++#define DEFAULT_EXP_PROXYCACHEDIR "/usr/local/apache2/proxy"
++#define DEFAULT_REL_PROXYCACHEDIR "proxy"
++*/
++
++#endif /* AP_CONFIG_LAYOUT_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/arm/include/ap_config_auto.h incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/arm/include/ap_config_auto.h
+--- incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/arm/include/ap_config_auto.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/arm/include/ap_config_auto.h	2020-05-11 17:48:18.619729626 +0100
+@@ -0,0 +1,269 @@
++/* include/ap_config_auto.h.  Generated from ap_config_auto.h.in by configure.  */
++/* include/ap_config_auto.h.in.  Generated from configure.in by autoheader.  */
++
++/* SuExec root directory */
++/* #undef AP_DOC_ROOT */
++
++/* Enable DTrace probes */
++/* #undef AP_ENABLE_DTRACE */
++
++/* Allow modules to run hook after a fatal exception */
++/* #undef AP_ENABLE_EXCEPTION_HOOK */
++
++/* Allow IPv4 connections on IPv6 listening sockets */
++#define AP_ENABLE_V4_MAPPED 1
++
++/* Minimum allowed GID */
++/* #undef AP_GID_MIN */
++
++/* Enable the APR hook probes capability, reading from ap_hook_probes.h */
++/* #undef AP_HOOK_PROBES_ENABLED */
++
++/* User allowed to call SuExec */
++/* #undef AP_HTTPD_USER */
++
++/* SuExec log file */
++/* #undef AP_LOG_EXEC */
++
++/* Listening sockets are non-blocking when there are more than 1 */
++#define AP_NONBLOCK_WHEN_MULTI_LISTEN 1
++
++/* safe shell path for SuExec */
++/* #undef AP_SAFE_PATH */
++
++/* umask for suexec'd process */
++/* #undef AP_SUEXEC_UMASK */
++
++/* Location of the MIME types config file, relative to the Apache root
++   directory */
++#define AP_TYPES_CONFIG_FILE "conf/mime.types"
++
++/* Minimum allowed UID */
++/* #undef AP_UID_MIN */
++
++/* User subdirectory */
++/* #undef AP_USERDIR_SUFFIX */
++
++/* Using autoconf to configure Apache */
++#define AP_USING_AUTOCONF 1
++
++/* Define to 1 if you have the `bindprocessor' function. */
++/* #undef HAVE_BINDPROCESSOR */
++
++/* Define to 1 if you have the <bstring.h> header file. */
++/* #undef HAVE_BSTRING_H */
++
++/* Define if distcache support is enabled */
++/* #undef HAVE_DISTCACHE */
++
++/* Define to 1 if you have the <distcache/dc_client.h> header file. */
++/* #undef HAVE_DISTCACHE_DC_CLIENT_H */
++
++/* Define to 1 if you have the `ENGINE_init' function. */
++#define HAVE_ENGINE_INIT 1
++
++/* Define to 1 if you have the `ENGINE_load_builtin_engines' function. */
++#define HAVE_ENGINE_LOAD_BUILTIN_ENGINES 1
++
++/* Define to 1 if you have the `epoll_create' function. */
++#define HAVE_EPOLL_CREATE 1
++
++/* Define to 1 if you have the `fopen64' function. */
++#define HAVE_FOPEN64 1
++
++/* Define to 1 if you have the `getgrnam' function. */
++#define HAVE_GETGRNAM 1
++
++/* Define to 1 if you have the `getpgid' function. */
++#define HAVE_GETPGID 1
++
++/* Define to 1 if you have the `getpwnam' function. */
++#define HAVE_GETPWNAM 1
++
++/* Define if you have gettid() */
++#define HAVE_GETTID 1
++
++/* Define if struct tm has a tm_gmtoff field */
++#define HAVE_GMTOFF 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define to 1 if you have the `initgroups' function. */
++#define HAVE_INITGROUPS 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the `killpg' function. */
++#define HAVE_KILLPG 1
++
++/* Define to 1 if you have the `kqueue' function. */
++/* #undef HAVE_KQUEUE */
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define if OpenSSL is available */
++#define HAVE_OPENSSL 1
++
++/* Define to 1 if you have the <openssl/engine.h> header file. */
++#define HAVE_OPENSSL_ENGINE_H 1
++
++/* Define to 1 if you have the `port_create' function. */
++/* #undef HAVE_PORT_CREATE */
++
++/* Define to 1 if you have the `prctl' function. */
++#define HAVE_PRCTL 1
++
++/* Define to 1 if you have the <priv.h> header file. */
++/* #undef HAVE_PRIV_H */
++
++/* Define to 1 if you have the `pthread_kill' function. */
++#define HAVE_PTHREAD_KILL 1
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define to 1 if you have the `SSLeay_version' function. */
++#define HAVE_SSLEAY_VERSION 1
++
++/* Define to 1 if you have the `SSL_CTX_new' function. */
++#define HAVE_SSL_CTX_NEW 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `syslog' function. */
++#define HAVE_SYSLOG 1
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/prctl.h> header file. */
++#define HAVE_SYS_PRCTL_H 1
++
++/* Define to 1 if you have the <sys/processor.h> header file. */
++/* #undef HAVE_SYS_PROCESSOR_H */
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/sdt.h> header file. */
++/* #undef HAVE_SYS_SDT_H */
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/times.h> header file. */
++#define HAVE_SYS_TIMES_H 1
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define to 1 if you have the `timegm' function. */
++#define HAVE_TIMEGM 1
++
++/* Define to 1 if you have the `times' function. */
++#define HAVE_TIMES 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Root directory of the Apache install area */
++#define HTTPD_ROOT "/usr/local/apache24"
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the home page for this package. */
++#define PACKAGE_URL ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Location of the config file, relative to the Apache root directory */
++#define SERVER_CONFIG_FILE "conf/httpd.conf"
++
++/* This platform doesn't suffer from the thundering herd problem */
++#define SINGLE_LISTEN_UNSERIALIZED_ACCEPT 1
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Path to suexec binary */
++/* #undef SUEXEC_BIN */
++
++/* Enable extensions on AIX 3, Interix.  */
++#ifndef _ALL_SOURCE
++# define _ALL_SOURCE 1
++#endif
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++/* Enable threading extensions on Solaris.  */
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++/* Enable extensions on HP NonStop.  */
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++/* Enable general extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to 'int' if <sys/resource.h> doesn't define it for us */
++/* #undef rlim_t */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/arm/include/ap_config_layout.h incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/arm/include/ap_config_layout.h
+--- incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/arm/include/ap_config_layout.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/arm/include/ap_config_layout.h	2020-05-11 17:48:18.619729626 +0100
+@@ -0,0 +1,64 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @file  ap_config_layout.h
++ * @brief Apache Config Layout
++ */
++
++#ifndef AP_CONFIG_LAYOUT_H
++#define AP_CONFIG_LAYOUT_H
++
++/* Configured Apache directory layout */
++#define DEFAULT_PREFIX "/usr/local/apache24"
++#define DEFAULT_EXP_EXEC_PREFIX "/usr/local/apache24"
++#define DEFAULT_REL_EXEC_PREFIX ""
++#define DEFAULT_EXP_BINDIR "/usr/local/apache24/bin"
++#define DEFAULT_REL_BINDIR "bin"
++#define DEFAULT_EXP_SBINDIR "/usr/local/apache24/bin"
++#define DEFAULT_REL_SBINDIR "bin"
++#define DEFAULT_EXP_LIBEXECDIR "/usr/local/apache24/modules"
++#define DEFAULT_REL_LIBEXECDIR "modules"
++#define DEFAULT_EXP_MANDIR "/usr/local/apache24/man"
++#define DEFAULT_REL_MANDIR "man"
++#define DEFAULT_EXP_SYSCONFDIR "/usr/local/apache24/conf"
++#define DEFAULT_REL_SYSCONFDIR "conf"
++#define DEFAULT_EXP_DATADIR "/usr/local/apache24"
++#define DEFAULT_REL_DATADIR ""
++#define DEFAULT_EXP_INSTALLBUILDDIR "/usr/local/apache24/build"
++#define DEFAULT_REL_INSTALLBUILDDIR "build"
++#define DEFAULT_EXP_ERRORDIR "/usr/local/apache24/error"
++#define DEFAULT_REL_ERRORDIR "error"
++#define DEFAULT_EXP_ICONSDIR "/usr/local/apache24/icons"
++#define DEFAULT_REL_ICONSDIR "icons"
++#define DEFAULT_EXP_HTDOCSDIR "/usr/local/apache24/htdocs"
++#define DEFAULT_REL_HTDOCSDIR "htdocs"
++#define DEFAULT_EXP_MANUALDIR "/usr/local/apache24/manual"
++#define DEFAULT_REL_MANUALDIR "manual"
++#define DEFAULT_EXP_CGIDIR "/usr/local/apache24/cgi-bin"
++#define DEFAULT_REL_CGIDIR "cgi-bin"
++#define DEFAULT_EXP_INCLUDEDIR "/usr/local/apache24/include"
++#define DEFAULT_REL_INCLUDEDIR "include"
++#define DEFAULT_EXP_LOCALSTATEDIR "/usr/local/apache24"
++#define DEFAULT_REL_LOCALSTATEDIR ""
++#define DEFAULT_EXP_RUNTIMEDIR "/usr/local/apache24/logs"
++#define DEFAULT_REL_RUNTIMEDIR "logs"
++#define DEFAULT_EXP_LOGFILEDIR "/usr/local/apache24/logs"
++#define DEFAULT_REL_LOGFILEDIR "logs"
++#define DEFAULT_EXP_PROXYCACHEDIR "/usr/local/apache24/proxy"
++#define DEFAULT_REL_PROXYCACHEDIR "proxy"
++
++#endif /* AP_CONFIG_LAYOUT_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_auto.h incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_auto.h
+--- incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_auto.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_auto.h	2020-05-11 17:48:18.619729626 +0100
+@@ -0,0 +1,269 @@
++/* include/ap_config_auto.h.  Generated from ap_config_auto.h.in by configure.  */
++/* include/ap_config_auto.h.in.  Generated from configure.in by autoheader.  */
++
++/* SuExec root directory */
++/* #undef AP_DOC_ROOT */
++
++/* Enable DTrace probes */
++/* #undef AP_ENABLE_DTRACE */
++
++/* Allow modules to run hook after a fatal exception */
++/* #undef AP_ENABLE_EXCEPTION_HOOK */
++
++/* Allow IPv4 connections on IPv6 listening sockets */
++#define AP_ENABLE_V4_MAPPED 1
++
++/* Minimum allowed GID */
++/* #undef AP_GID_MIN */
++
++/* Enable the APR hook probes capability, reading from ap_hook_probes.h */
++/* #undef AP_HOOK_PROBES_ENABLED */
++
++/* User allowed to call SuExec */
++/* #undef AP_HTTPD_USER */
++
++/* SuExec log file */
++/* #undef AP_LOG_EXEC */
++
++/* Listening sockets are non-blocking when there are more than 1 */
++#define AP_NONBLOCK_WHEN_MULTI_LISTEN 1
++
++/* safe shell path for SuExec */
++/* #undef AP_SAFE_PATH */
++
++/* umask for suexec'd process */
++/* #undef AP_SUEXEC_UMASK */
++
++/* Location of the MIME types config file, relative to the Apache root
++   directory */
++#define AP_TYPES_CONFIG_FILE "conf/mime.types"
++
++/* Minimum allowed UID */
++/* #undef AP_UID_MIN */
++
++/* User subdirectory */
++/* #undef AP_USERDIR_SUFFIX */
++
++/* Using autoconf to configure Apache */
++#define AP_USING_AUTOCONF 1
++
++/* Define to 1 if you have the `bindprocessor' function. */
++/* #undef HAVE_BINDPROCESSOR */
++
++/* Define to 1 if you have the <bstring.h> header file. */
++/* #undef HAVE_BSTRING_H */
++
++/* Define if distcache support is enabled */
++/* #undef HAVE_DISTCACHE */
++
++/* Define to 1 if you have the <distcache/dc_client.h> header file. */
++/* #undef HAVE_DISTCACHE_DC_CLIENT_H */
++
++/* Define to 1 if you have the `ENGINE_init' function. */
++#define HAVE_ENGINE_INIT 1
++
++/* Define to 1 if you have the `ENGINE_load_builtin_engines' function. */
++#define HAVE_ENGINE_LOAD_BUILTIN_ENGINES 1
++
++/* Define to 1 if you have the `epoll_create' function. */
++#define HAVE_EPOLL_CREATE 1
++
++/* Define to 1 if you have the `fopen64' function. */
++#define HAVE_FOPEN64 1
++
++/* Define to 1 if you have the `getgrnam' function. */
++#define HAVE_GETGRNAM 1
++
++/* Define to 1 if you have the `getpgid' function. */
++#define HAVE_GETPGID 1
++
++/* Define to 1 if you have the `getpwnam' function. */
++#define HAVE_GETPWNAM 1
++
++/* Define if you have gettid() */
++#define HAVE_GETTID 1
++
++/* Define if struct tm has a tm_gmtoff field */
++#define HAVE_GMTOFF 1
++
++/* Define to 1 if you have the <grp.h> header file. */
++#define HAVE_GRP_H 1
++
++/* Define to 1 if you have the `initgroups' function. */
++#define HAVE_INITGROUPS 1
++
++/* Define to 1 if you have the <inttypes.h> header file. */
++#define HAVE_INTTYPES_H 1
++
++/* Define to 1 if you have the `killpg' function. */
++#define HAVE_KILLPG 1
++
++/* Define to 1 if you have the `kqueue' function. */
++/* #undef HAVE_KQUEUE */
++
++/* Define to 1 if you have the <limits.h> header file. */
++#define HAVE_LIMITS_H 1
++
++/* Define to 1 if you have the <memory.h> header file. */
++#define HAVE_MEMORY_H 1
++
++/* Define if OpenSSL is available */
++#define HAVE_OPENSSL 1
++
++/* Define to 1 if you have the <openssl/engine.h> header file. */
++#define HAVE_OPENSSL_ENGINE_H 1
++
++/* Define to 1 if you have the `port_create' function. */
++/* #undef HAVE_PORT_CREATE */
++
++/* Define to 1 if you have the `prctl' function. */
++#define HAVE_PRCTL 1
++
++/* Define to 1 if you have the <priv.h> header file. */
++/* #undef HAVE_PRIV_H */
++
++/* Define to 1 if you have the `pthread_kill' function. */
++#define HAVE_PTHREAD_KILL 1
++
++/* Define to 1 if you have the <pwd.h> header file. */
++#define HAVE_PWD_H 1
++
++/* Define to 1 if you have the `setsid' function. */
++#define HAVE_SETSID 1
++
++/* Define to 1 if you have the `SSLeay_version' function. */
++#define HAVE_SSLEAY_VERSION 1
++
++/* Define to 1 if you have the `SSL_CTX_new' function. */
++#define HAVE_SSL_CTX_NEW 1
++
++/* Define to 1 if you have the <stdint.h> header file. */
++#define HAVE_STDINT_H 1
++
++/* Define to 1 if you have the <stdlib.h> header file. */
++#define HAVE_STDLIB_H 1
++
++/* Define to 1 if you have the <strings.h> header file. */
++#define HAVE_STRINGS_H 1
++
++/* Define to 1 if you have the <string.h> header file. */
++#define HAVE_STRING_H 1
++
++/* Define to 1 if you have the `syslog' function. */
++#define HAVE_SYSLOG 1
++
++/* Define to 1 if you have the <sys/ipc.h> header file. */
++#define HAVE_SYS_IPC_H 1
++
++/* Define to 1 if you have the <sys/prctl.h> header file. */
++#define HAVE_SYS_PRCTL_H 1
++
++/* Define to 1 if you have the <sys/processor.h> header file. */
++/* #undef HAVE_SYS_PROCESSOR_H */
++
++/* Define to 1 if you have the <sys/resource.h> header file. */
++#define HAVE_SYS_RESOURCE_H 1
++
++/* Define to 1 if you have the <sys/sdt.h> header file. */
++/* #undef HAVE_SYS_SDT_H */
++
++/* Define to 1 if you have the <sys/sem.h> header file. */
++#define HAVE_SYS_SEM_H 1
++
++/* Define to 1 if you have the <sys/socket.h> header file. */
++#define HAVE_SYS_SOCKET_H 1
++
++/* Define to 1 if you have the <sys/stat.h> header file. */
++#define HAVE_SYS_STAT_H 1
++
++/* Define to 1 if you have the <sys/times.h> header file. */
++#define HAVE_SYS_TIMES_H 1
++
++/* Define to 1 if you have the <sys/time.h> header file. */
++#define HAVE_SYS_TIME_H 1
++
++/* Define to 1 if you have the <sys/types.h> header file. */
++#define HAVE_SYS_TYPES_H 1
++
++/* Define to 1 if you have <sys/wait.h> that is POSIX.1 compatible. */
++#define HAVE_SYS_WAIT_H 1
++
++/* Define to 1 if you have the `timegm' function. */
++#define HAVE_TIMEGM 1
++
++/* Define to 1 if you have the `times' function. */
++#define HAVE_TIMES 1
++
++/* Define to 1 if you have the <unistd.h> header file. */
++#define HAVE_UNISTD_H 1
++
++/* Root directory of the Apache install area */
++#define HTTPD_ROOT "/usr/local/apache24"
++
++/* Define to the address where bug reports for this package should be sent. */
++#define PACKAGE_BUGREPORT ""
++
++/* Define to the full name of this package. */
++#define PACKAGE_NAME ""
++
++/* Define to the full name and version of this package. */
++#define PACKAGE_STRING ""
++
++/* Define to the one symbol short name of this package. */
++#define PACKAGE_TARNAME ""
++
++/* Define to the home page for this package. */
++#define PACKAGE_URL ""
++
++/* Define to the version of this package. */
++#define PACKAGE_VERSION ""
++
++/* Location of the config file, relative to the Apache root directory */
++#define SERVER_CONFIG_FILE "conf/httpd.conf"
++
++/* This platform doesn't suffer from the thundering herd problem */
++#define SINGLE_LISTEN_UNSERIALIZED_ACCEPT 1
++
++/* Define to 1 if you have the ANSI C header files. */
++#define STDC_HEADERS 1
++
++/* Path to suexec binary */
++/* #undef SUEXEC_BIN */
++
++/* Enable extensions on AIX 3, Interix.  */
++#ifndef _ALL_SOURCE
++# define _ALL_SOURCE 1
++#endif
++/* Enable GNU extensions on systems that have them.  */
++#ifndef _GNU_SOURCE
++# define _GNU_SOURCE 1
++#endif
++/* Enable threading extensions on Solaris.  */
++#ifndef _POSIX_PTHREAD_SEMANTICS
++# define _POSIX_PTHREAD_SEMANTICS 1
++#endif
++/* Enable extensions on HP NonStop.  */
++#ifndef _TANDEM_SOURCE
++# define _TANDEM_SOURCE 1
++#endif
++/* Enable general extensions on Solaris.  */
++#ifndef __EXTENSIONS__
++# define __EXTENSIONS__ 1
++#endif
++
++
++/* Define to 1 if on MINIX. */
++/* #undef _MINIX */
++
++/* Define to 2 if the system does not provide POSIX.1 features except with
++   this defined. */
++/* #undef _POSIX_1_SOURCE */
++
++/* Define to 1 if you need to in order for `stat' and other things to work. */
++/* #undef _POSIX_SOURCE */
++
++/* Define to empty if `const' does not conform to ANSI C. */
++/* #undef const */
++
++/* Define to 'int' if <sys/resource.h> doesn't define it for us */
++/* #undef rlim_t */
+diff -Naur incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_layout.h incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_layout.h
+--- incubator-pagespeed-mod.orig/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_layout.h	1970-01-01 01:00:00.000000000 +0100
++++ incubator-pagespeed-mod/third_party/httpd24/gen/arch/linux/armv7l/include/ap_config_layout.h	2020-05-11 17:48:18.619729626 +0100
+@@ -0,0 +1,64 @@
++/* Licensed to the Apache Software Foundation (ASF) under one or more
++ * contributor license agreements.  See the NOTICE file distributed with
++ * this work for additional information regarding copyright ownership.
++ * The ASF licenses this file to You under the Apache License, Version 2.0
++ * (the "License"); you may not use this file except in compliance with
++ * the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/**
++ * @file  ap_config_layout.h
++ * @brief Apache Config Layout
++ */
++
++#ifndef AP_CONFIG_LAYOUT_H
++#define AP_CONFIG_LAYOUT_H
++
++/* Configured Apache directory layout */
++#define DEFAULT_PREFIX "/usr/local/apache24"
++#define DEFAULT_EXP_EXEC_PREFIX "/usr/local/apache24"
++#define DEFAULT_REL_EXEC_PREFIX ""
++#define DEFAULT_EXP_BINDIR "/usr/local/apache24/bin"
++#define DEFAULT_REL_BINDIR "bin"
++#define DEFAULT_EXP_SBINDIR "/usr/local/apache24/bin"
++#define DEFAULT_REL_SBINDIR "bin"
++#define DEFAULT_EXP_LIBEXECDIR "/usr/local/apache24/modules"
++#define DEFAULT_REL_LIBEXECDIR "modules"
++#define DEFAULT_EXP_MANDIR "/usr/local/apache24/man"
++#define DEFAULT_REL_MANDIR "man"
++#define DEFAULT_EXP_SYSCONFDIR "/usr/local/apache24/conf"
++#define DEFAULT_REL_SYSCONFDIR "conf"
++#define DEFAULT_EXP_DATADIR "/usr/local/apache24"
++#define DEFAULT_REL_DATADIR ""
++#define DEFAULT_EXP_INSTALLBUILDDIR "/usr/local/apache24/build"
++#define DEFAULT_REL_INSTALLBUILDDIR "build"
++#define DEFAULT_EXP_ERRORDIR "/usr/local/apache24/error"
++#define DEFAULT_REL_ERRORDIR "error"
++#define DEFAULT_EXP_ICONSDIR "/usr/local/apache24/icons"
++#define DEFAULT_REL_ICONSDIR "icons"
++#define DEFAULT_EXP_HTDOCSDIR "/usr/local/apache24/htdocs"
++#define DEFAULT_REL_HTDOCSDIR "htdocs"
++#define DEFAULT_EXP_MANUALDIR "/usr/local/apache24/manual"
++#define DEFAULT_REL_MANUALDIR "manual"
++#define DEFAULT_EXP_CGIDIR "/usr/local/apache24/cgi-bin"
++#define DEFAULT_REL_CGIDIR "cgi-bin"
++#define DEFAULT_EXP_INCLUDEDIR "/usr/local/apache24/include"
++#define DEFAULT_REL_INCLUDEDIR "include"
++#define DEFAULT_EXP_LOCALSTATEDIR "/usr/local/apache24"
++#define DEFAULT_REL_LOCALSTATEDIR ""
++#define DEFAULT_EXP_RUNTIMEDIR "/usr/local/apache24/logs"
++#define DEFAULT_REL_RUNTIMEDIR "logs"
++#define DEFAULT_EXP_LOGFILEDIR "/usr/local/apache24/logs"
++#define DEFAULT_REL_LOGFILEDIR "logs"
++#define DEFAULT_EXP_PROXYCACHEDIR "/usr/local/apache24/proxy"
++#define DEFAULT_REL_PROXYCACHEDIR "proxy"
++
++#endif /* AP_CONFIG_LAYOUT_H */
+diff -Naur incubator-pagespeed-mod.orig/third_party/libwebp/src/dsp/dsp.h incubator-pagespeed-mod/third_party/libwebp/src/dsp/dsp.h
+--- incubator-pagespeed-mod.orig/third_party/libwebp/src/dsp/dsp.h	2020-05-11 17:43:02.069668193 +0100
++++ incubator-pagespeed-mod/third_party/libwebp/src/dsp/dsp.h	2020-05-11 17:48:18.619729626 +0100
+@@ -85,7 +85,7 @@
+ #if (defined(__ARM_NEON__) || \
+      defined(__aarch64__) || defined(WEBP_HAVE_NEON)) && \
+     !defined(__native_client__)
+-#define WEBP_USE_NEON
++#undef WEBP_USE_NEON
+ #endif
+ 
+ #if !defined(WEBP_USE_NEON) && defined(__ANDROID__) && \
+@@ -121,7 +121,7 @@
+ #endif
+ 
+ #if (defined(__aarch64__) || defined(__ARM_NEON__)) && WEBP_DSP_OMIT_C_CODE
+-#define WEBP_NEON_OMIT_C_CODE 1
++#define WEBP_NEON_OMIT_C_CODE 0
+ #else
+ #define WEBP_NEON_OMIT_C_CODE 0
+ #endif
