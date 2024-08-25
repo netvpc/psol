@@ -3721,7 +3721,7 @@ index 7a604358cd..8b7949705f 100644
 diff --git a/net/instaweb/genfiles/conf/pagespeed_libraries.conf b/net/instaweb/genfiles/conf/pagespeed_libraries.conf
 --- a/net/instaweb/genfiles/conf/pagespeed_libraries.conf
 +++ b/net/instaweb/genfiles/conf/pagespeed_libraries.conf
-@@ -1234,6 +1234,16 @@
+@@ -1234,6 +1234,14 @@
      ModPagespeedLibrary 88059 tJmcu2pzqbMS9jXP915aU //ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js
      # jquery/3.4.1/jquery.js:
      ModPagespeedLibrary 141767 YMjN_PDe4cETVTWLoSfvI //ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js
@@ -3732,7 +3732,7 @@ diff --git a/net/instaweb/genfiles/conf/pagespeed_libraries.conf b/net/instaweb/
 +    # jquery/3.7.1/jquery.min.js
 +    ModPagespeedLibrary 110374 v2CJ7UaYy4JwqLDIrZUI //cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js
 +    # jquery/3.7.1/jquery.js
-+    ModPagespeedLibrary 183456 +k1pnlgt4F1H8L7t3z95 //cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.js
++    ModPagespeedLibrary 183456 k1pnlgt4F1H8L7t3z95 //cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.js
      # jquerymobile/1.4.0/jquery.mobile.min.js:
      ModPagespeedLibrary 193066 pkv8dHWLVaOlDGcgh0PYe //ajax.googleapis.com/ajax/libs/jquerymobile/1.4.0/jquery.mobile.min.js
      # jquerymobile/1.4.0/jquery.mobile.js:
