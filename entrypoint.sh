@@ -27,6 +27,12 @@ if [[ -n "$PATCH_FILE" ]]; then
     echo -e "${CYAN}Applying patch for $ARCH...${NO_COLOR}"
     patch -Np1 -i "$PATCH_FILE"
 elif [[ "$ARCH" == "x86_64" ]]; then
+    touch install/debian/install_required_packages.sh && \
+    touch install/debian/build_env.sh && \
+        sed -i  /"run_with_log log\/install_deps.log"/d install/build_psol.sh && \
+        sed -i s/"run_with_log log\/gyp.log"//g            install/build_psol.sh && \
+        sed -i s/"run_with_log log\/psol_build.log"//g     install/build_psol.sh && \
+        sed -i /"run_with_log \.\.\/\.\.\/log\/psol_automatic_build.log"/d install/build_psol.sh && \
     echo -e "${YELLOW}x86_64 architecture detected. No patch applied.${NO_COLOR}"
 else
     echo -e "${RED}Unsupported architecture: $ARCH${NO_COLOR}"
