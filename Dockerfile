@@ -44,6 +44,8 @@ RUN bash -c ' \
             echo "Applying patch for $ARCH..." && \
             patch -Np1 -i "${PATCH_FILES[$ARCH]}" ; \
         elif [[ "$ARCH" == "x86_64" ]]; then \
+            touch install/debian/install_required_packages.sh && \
+            touch install/debian/build_env.sh && \
             echo "x86_64 architecture detected. No patch applied." ; \
         else \
             echo "Unsupported architecture: $ARCH" && exit 1 ; \
