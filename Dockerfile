@@ -21,8 +21,8 @@ RUN cd /tmp/ && \
 WORKDIR /usr/src
 RUN git clone -c advice.detachedHead=false --recursive https://github.com/apache/incubator-pagespeed-mod.git
 
-RUN wget https://gitlab.com/gusco/ngx_pagespeed_arm/-/raw/master/incubator-pagespeed-mod-aarch64.patch -O /usr/src/incubator-pagespeed-mod-aarch64.patch
-RUN wget https://gitlab.com/gusco/ngx_pagespeed_arm/-/raw/master/incubator-pagespeed-mod-armv7l.patch -O /usr/src/incubator-pagespeed-mod-armv7l.patch
+COPY ./incubator-pagespeed-mod-aarch64.patch  /usr/src/incubator-pagespeed-mod-aarch64.patch
+COPY ./incubator-pagespeed-mod-armv7l.patch /usr/src/incubator-pagespeed-mod-armv7l.patch
 
 WORKDIR /usr/src/incubator-pagespeed-mod
 RUN git reset --hard 409bd76fd6eafc4cf1c414e679f3e912447a6a31
