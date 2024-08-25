@@ -46,6 +46,10 @@ RUN bash -c ' \
         elif [[ "$ARCH" == "x86_64" ]]; then \
             touch install/debian/install_required_packages.sh && \
             touch install/debian/build_env.sh && \
+            sed -i  /"run_with_log log\/install_deps.log"/d install/build_psol.sh && \
+            sed -i s/"run_with_log log\/gyp.log"//g            install/build_psol.sh && \
+            sed -i s/"run_with_log log\/psol_build.log"//g     install/build_psol.sh && \
+            sed -i /"run_with_log \.\.\/\.\.\/log\/psol_automatic_build.log"/d install/build_psol.sh && \
             echo "x86_64 architecture detected. No patch applied." ; \
         else \
             echo "Unsupported architecture: $ARCH" && exit 1 ; \
