@@ -6,7 +6,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-MAGENTA='\033[0;35m'
 NO_COLOR='\033[0m'
 
 # Define animation frames
@@ -19,32 +18,31 @@ declare -A PATCH_FILES=(
     ["x86_64"]="/usr/src/incubator-pagespeed-mod-x86_64.patch"
 )
 
-# Get current architecture
+# Get current architecture and glibc version
 ARCH=$(uname -m)
+GLIBC_VERSION=$(ldd --version | awk 'NR==1 {print $NF}')
+GLIBC_VERSION_NUMBER=$(awk -F. '{print $1 * 100 + $2}' <<< "$GLIBC_VERSION")
 
 # Apply the appropriate patch
 PATCH_FILE="${PATCH_FILES[$ARCH]}"
 if [[ -n "$PATCH_FILE" ]]; then
-    echo -e "${CYAN}Applying patch for $ARCH...${NO_COLOR}"
+    printf "${CYAN}Applying patch for $ARCH...${NO_COLOR}\n"
     patch -Np1 -i "$PATCH_FILE"
 else
-    echo -e "${RED}Unsupported architecture: $ARCH${NO_COLOR}"
+    printf "${RED}Unsupported architecture: $ARCH${NO_COLOR}\n"
     exit 1
 fi
 
 # Check glibc version and apply sed command if necessary
-GLIBC_VERSION=$(ldd --version | awk 'NR==1 {print $NF}')
-GLIBC_VERSION_NUMBER=$(echo "$GLIBC_VERSION" | awk -F. '{print $1 * 100 + $2}')
-
 if [[ "$GLIBC_VERSION_NUMBER" -ge 228 ]]; then
-    echo -e "${CYAN}glibc version $GLIBC_VERSION detected. Applying sed command...${NO_COLOR}"
+    printf "${CYAN}glibc version $GLIBC_VERSION detected. Applying sed command...${NO_COLOR}\n"
     sed -i 's/sys_siglist\[signum\]/strsignal(signum)/g' /usr/src/incubator-pagespeed-mod/third_party/apr/src/threadproc/unix/signals.c
 else
-    echo -e "${YELLOW}glibc version $GLIBC_VERSION detected. No sed command applied.${NO_COLOR}"
+    printf "${YELLOW}glibc version $GLIBC_VERSION detected. No sed command applied.${NO_COLOR}\n"
 fi
 
 # Run the build and installation scripts
-echo -e "${GREEN}Running build and installation scripts...${NO_COLOR}"
+printf "${GREEN}Running build and installation scripts...${NO_COLOR}\n"
 python /usr/src/incubator-pagespeed-mod/build/gyp_chromium --depth=/usr/src/incubator-pagespeed-mod
 
 # Run the build_psol.sh script in the background
@@ -64,17 +62,29 @@ while kill -0 "$BUILD_PID" 2> /dev/null; do
     FRAME_INDEX=$(( ELAPSED_TIME / 2 % ${#SPINNER[@]} ))
     
     # Print status with spinner
-    echo -ne "${YELLOW}Hang tight! ${MAGENTA}Maybe grab a coffee? ${NO_COLOR}Elapsed time: ${BLUE}${ELAPSED_HOURS}h ${ELAPSED_MINUTES}m ${ELAPSED_SECONDS}s ${SPINNER[$FRAME_INDEX]}\r"
+    printf "${YELLOW}Hang tight! ${NO_COLOR}Elapsed time: ${BLUE}%dh %dm %ds ${SPINNER[$FRAME_INDEX]}\r" \
+        "$ELAPSED_HOURS" "$ELAPSED_MINUTES" "$ELAPSED_SECONDS"
     sleep 0.1  # Shorter sleep time for smoother animation
 done
 
 # Clear the line after the spinner stops
-echo -ne '\r'
+printf '\r'
 
 # Check the exit status of the build process
 if wait "$BUILD_PID"; then
-    echo -e "${GREEN}Build and installation completed successfully.${NO_COLOR}"
+    printf "${GREEN}Build and installation completed successfully.${NO_COLOR}\n"
+    tar -xzf psol-1.15.0.0-*.tar.gz
+
+    TAR_FILENAME="psol-1.15.0.0-${ARCH}-glibc-${GLIBC_VERSION}.tar.gz"
+    if [[ -d /usr/src/incubator-pagespeed-mod/psol ]]; then
+        tar -czf "/dist/$TAR_FILENAME" -C /usr/src/incubator-pagespeed-mod psol
+        printf "${GREEN}Successfully created and moved $TAR_FILENAME.${NO_COLOR}\n"
+    else
+        printf "${RED}Directory /usr/src/incubator-pagespeed-mod/psol not found for compression.${NO_COLOR}\n"
+        exit 1
+    fi
+    printf "${GREEN}Have fun with PAGESPEED.${NO_COLOR}\n"
 else
-    echo -e "${RED}Build and installation failed.${NO_COLOR}"
+    printf "${RED}Build and installation failed.${NO_COLOR}\n"
     exit 1
 fi
